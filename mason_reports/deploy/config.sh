@@ -1,0 +1,12 @@
+# Shared settings for the deploy scripts. Edit these before the first deploy.
+PROJECT="${PROJECT:-mcps-507817}"                   # Cameramall
+REGION="${REGION:-us-west1}"
+BUCKET="${BUCKET:-${PROJECT}-lifesaver-data}"      # private bucket holding lifesaver.sqlite
+WEB_SERVICE="${WEB_SERVICE:-lifesaver-reports}"
+RUNTIME_SA="lifesaver-reports@${PROJECT}.iam.gserviceaccount.com"
+BUILD_SA="lifesaver-builder@${PROJECT}.iam.gserviceaccount.com"   # Cloud Build runs as this
+DATA_URI="gs://${BUCKET}/lifesaver.sqlite"
+USERS_URI="gs://${BUCKET}/users.json"                # site logins (manage with deploy/users.sh)
+SESSION_SECRET_NAME="lifesaver-session-secret"      # Secret Manager secret that signs login cookies
+MCP_SERVICE="${MCP_SERVICE:-lifesaver-mcp}"
+MCP_TOKEN_NAME="lifesaver-mcp-token"                # Secret Manager secret in the MCP connector URL

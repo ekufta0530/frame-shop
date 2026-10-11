@@ -1,0 +1,7 @@
+# customer data - never commit
+csv/
+*.sqlite
+*.zip
+__pycache__/
+.venv/
+users.json

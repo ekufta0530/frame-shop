@@ -1,0 +1,7 @@
+csv/
+*.sqlite
+*.zip
+**/__pycache__/
+.venv/
+deploy/
+users.json

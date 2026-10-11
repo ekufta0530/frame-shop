@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Frame Shop Reports</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="login-page">
+  <main class="login-card card">
+    <h1>Frame Shop Reports</h1>
+    <p class="muted">Sign in to continue.</p>
+    <form id="loginForm" novalidate>
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" autocomplete="username" autocapitalize="none"
+             spellcheck="false" required autofocus>
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+      <div id="loginError" class="error" role="alert" hidden></div>
+      <button class="btn primary block" type="submit" id="loginBtn">Sign in</button>
+    </form>
+    <p class="muted small">Forgot your password? Ask the site administrator to reset it.</p>
+  </main>
+  <script src="login.js"></script>
+</body>
+</html>
