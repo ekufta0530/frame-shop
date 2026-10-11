@@ -28,6 +28,8 @@ env:
 
 jobs:
   ingest:
+    # skipped (not failed) until DEPLOY.md §8 setup sets the folder variable
+    if: vars.MASON_DRIVE_FOLDER_ID != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
