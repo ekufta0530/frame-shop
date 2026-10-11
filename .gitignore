@@ -26,3 +26,9 @@ dashboard/mason.html
 # Mason store's LifeSaver extract (customer data), pulled by publish.sh
 mason.sqlite
 .DS_Store
+
+# raw LifeSaver desktop data from the owner (customer data) -- never committed
+Extractor/
+*.dbf
+*.zip
+*.sqlite

@@ -13,3 +13,6 @@ starlette>=0.40   # JSONResponse in the auth middleware (also an mcp dep)
 # Phase 1 FastAPI app (local dev / tests; not used by the deployed MCP server)
 fastapi>=0.115
 httpx>=0.27
+
+# Mason store: LifeSaver desktop .dbf tables -> lifesaver.sqlite (sqlite_extract.extract)
+dbfread>=2.0.7

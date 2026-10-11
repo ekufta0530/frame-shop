@@ -1,0 +1,65 @@
+name: mason data from drive
+
+# Every 6 hours: if the Mason owner has dropped a new LifeSaver upload (zip or
+# folder) into the shared Drive folder, rebuild lifesaver.sqlite from it, check
+# it isn't older/smaller than the live one, publish it, and re-render the
+# dashboard. A run with nothing new takes a few Drive API calls and exits.
+#
+# Same WIF identity as publish.yml (gha-deployer). One-time setup -- Drive API,
+# bucket write access, sharing the folder, the MASON_DRIVE_FOLDER_ID repo
+# variable -- is in cloud/DEPLOY.md §8.
+
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Reprocess the newest upload and publish it even if the checks fail"
+        type: boolean
+        default: false
+
+concurrency: mason-ingest
+
+env:
+  DATA_BUCKET: mcps-507817-lifesaver-data
+  SITE_BUCKET: lifesaver-kpi-dashboard-303f74
+  WAREHOUSE_BUCKET: lifesaver-kpi-warehouse
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: mcps-507817
+
+      - id: ingest
+        name: Pull new upload from Drive -> lifesaver.sqlite
+        env:
+          DRIVE_FOLDER_ID: ${{ vars.MASON_DRIVE_FOLDER_ID }}
+          DRIVE_TOKEN: ${{ steps.auth.outputs.access_token }}
+          FORCE: ${{ inputs.force || false }}
+        run: bash sqlite_extract/ingest.sh
+
+      - name: Rebuild + publish dashboard
+        if: steps.ingest.outputs.published == 'true'
+        run: |
+          gcloud storage cp "gs://$WAREHOUSE_BUCKET/warehouse.db" warehouse.db
+          bash dashboard/publish.sh
