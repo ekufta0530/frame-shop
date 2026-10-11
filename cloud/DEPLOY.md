@@ -1,6 +1,22 @@
-# Deploying the Lifesaver MCP server
+# Deploying: MCP server, dashboard, and data refreshes
 
-One container, one Cloud Run service, serving the MCP endpoint over
+Everything lives in GCP project `mcps-507817`. All automation runs as the
+`gha-deployer` service account through Workload Identity Federation (§6).
+
+| § | What | Runs |
+|---|---|---|
+| 1–5 | The cloud MCP server on Cloud Run (image, secrets, deploy, verify, claude.ai) | once, by hand |
+| 6 | CI/CD: push to `main` redeploys the MCP server + dashboard (`publish.yml`), plus the WIF setup every workflow uses | on push |
+| 7 | Main store's daily data refresh (`refresh.yml`) | daily |
+| 8 | Mason's data from Google Drive (`mason-ingest.yml`) | every 6 h |
+
+Each § lists the one-time IAM grants it needs on top of the earlier ones. The
+end-to-end picture and the bucket map are in the
+[top-level README](../README.md#how-it-fits-together).
+
+---
+
+The MCP server is one container and one Cloud Run service, serving the MCP endpoint over
 streamable-http for a **claude.ai custom connector**.
 
 ```
@@ -281,6 +297,65 @@ seconds of latency. Scheduling the cron for the store's quietest hour avoids it
 in practice.
 
 Trigger manually any time: **Actions → refresh dashboard data → Run workflow**.
+
+---
+
+## 8. Mason data from Google Drive (`.github/workflows/mason-ingest.yml`)
+
+The Mason owner drops a copy of their LifeSaver folder (zipped or not) into a
+Drive folder shared with `gha-deployer`. Every 6 hours the workflow runs
+`sqlite_extract/ingest.sh`: newest upload → just the 9 needed `.dbf`/`.fpt`
+files → `lifesaver.sqlite` → refuse it if it has fewer work orders/customers or
+an older latest order date than the live one → publish to
+`gs://mcps-507817-lifesaver-data/lifesaver.sqlite` (previous copy to
+`archive/`, source tables to `raw/<ts>/`) → `dashboard/publish.sh`. Uploads
+changed in the last 30 min are left for the next run (still uploading). The
+outcome is in `gs://mcps-507817-lifesaver-data/ingest/state.json`; a rejected
+upload fails the run once, then is skipped until a new upload arrives.
+
+One-time setup:
+
+```bash
+PROJECT=mcps-507817
+SA=gha-deployer@$PROJECT.iam.gserviceaccount.com
+
+gcloud services enable drive.googleapis.com --project=$PROJECT
+
+# write lifesaver.sqlite / archive/ / raw/ / ingest/state.json
+gcloud storage buckets add-iam-policy-binding gs://$PROJECT-lifesaver-data \
+  --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
+
+# delete the extracted source tables after a year (they hold customer data)
+echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":365,"matchesPrefix":["raw/"]}}]}' > /tmp/lc.json
+gcloud storage buckets update gs://$PROJECT-lifesaver-data --lifecycle-file=/tmp/lc.json
+```
+
+Then:
+
+1. Create a Drive folder (e.g. "LifeSaver uploads"), **share it with
+   `gha-deployer@mcps-507817.iam.gserviceaccount.com` as Viewer**, and share it
+   with the owner as Editor.
+2. Set the repo variable `MASON_DRIVE_FOLDER_ID` to the folder's ID (the last
+   part of its URL): `gh variable set MASON_DRIVE_FOLDER_ID --body <id>`.
+3. **Actions → mason data from drive → Run workflow** once to confirm.
+
+Owner instructions: drag the LifeSaver folder (or a zip of it) into the shared
+folder. Old uploads can stay; the newest one wins.
+
+Re-publish an upload the checks rejected (e.g. after deliberately purging old
+work orders): run the workflow with **force** ticked. Roll back: copy an
+`archive/lifesaver-<ts>.sqlite` over `lifesaver.sqlite`. More detail
+(each step, what a red run means, the data model):
+[sqlite_extract/README.md](../sqlite_extract/README.md).
+
+Local run (your user needs `roles/iam.serviceAccountTokenCreator` on the SA to
+impersonate it):
+
+```bash
+DRIVE_FOLDER_ID=<id> DRIVE_TOKEN=$(gcloud auth print-access-token \
+  --impersonate-service-account=$SA --scopes=https://www.googleapis.com/auth/drive.readonly) \
+  sqlite_extract/ingest.sh
+```
 
 ---
 

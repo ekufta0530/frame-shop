@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Daily refresh: pull the warehouse from GCS, sync new data, rebuild the
-# dashboard, push everything back. This is exactly what the scheduled Cloud Run
-# Job runs; it also works locally (needs gcloud auth + LIFESAVER_USERNAME /
-# LIFESAVER_PASSWORD in the environment).
+# dashboard, push everything back. The same steps as
+# .github/workflows/refresh.yml (the scheduled daily run), as one script for
+# running locally (needs gcloud auth + LIFESAVER_USERNAME / LIFESAVER_PASSWORD
+# in the environment).
 #
 #   WAREHOUSE_BUCKET=lifesaver-kpi-warehouse \
 #   SITE_BUCKET=lifesaver-kpi-dashboard-303f74 \

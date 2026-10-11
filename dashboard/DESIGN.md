@@ -332,33 +332,38 @@ Local-first v1: **$0.** When it moves to the cloud:
 
 ## 13. Repo layout — as built
 
-The design doc lives in `dashboard/`; the backend is its own package, sibling to
-`lifesaver/` and `mcp_server/`. It's mostly ETL, not UI.
+Originally one top-level `warehouse/` package. The 2026-10-07 split moved the
+store-independent half into `core/` so a second store (Mason, fed by a LifeSaver
+desktop extract instead of lsscloud.com) could reuse the KPI math. The full map
+is in the top-level README; the Phase 3 parts are:
 
 ```
-lifesaver/          unchanged — the lsscloud.com scraper client/parser
-warehouse/          Phase 3 backend
-  config.py         env-var settings (db path, raw dir, status filter, windows)
-  models.py         dataclasses + natural_key() + content_hash() + CALC_VERSION
-  months.py         month arithmetic (no python-dateutil)
-  identity.py       pure: customer_raw -> customer_id (exact + normalized)
-  visits.py         pure: line_items -> visits + customer_lifecycle
-  kpis.py           pure: visits -> the 5 KpiSnapshots for a report month
-  store.py          SQLite: the ONLY storage-aware module (raw / upsert / query)
-  pipeline.py       orchestration: sync_range, resolve, rebuild, snapshot, backfill
-  job.py            CLI: status | backfill | sync | resolve | rebuild | snapshot | kpis | review
+core/                     store-independent; imports nothing else in the repo
+  config.py               KPI settings (non-sale statuses, cohort window)
+  models.py               dataclasses + CALC_VERSION
+  months.py               month arithmetic (no python-dateutil)
+  visits.py               pure: lines -> visits + customer_lifecycle
+  kpis.py                 pure: visits -> the 5 KpiSnapshots for a report month
+  store.py                SQLite tables both stores write (visits, customer_lifecycle, kpi_monthly, sync_checkpoints)
+cloud/warehouse/          main store's ingest (lsscloud.com) -> core
+  config.py, models.py    env-var settings; raw/line-item models, natural_key(), content_hash()
+  identity.py             pure: customer_raw -> customer_id (exact + normalized)
+  store.py                raw landing + line_items on top of core.store
+  pipeline.py             orchestration: sync_range, resolve, rebuild, snapshot, backfill
+  job.py                  CLI: status | backfill | sync | resolve | rebuild | snapshot | kpis | review
+sqlite_extract/           Mason's ingest (Drive upload -> lifesaver.sqlite -> core); see its README
 dashboard/
-  DESIGN.md         this doc
-  build.py          reads the warehouse -> self-contained index.html (+ data.json)
-  publish.sh        build + upload index.html/data.json to the GCS site bucket
-  refresh.sh        full daily cycle: pull db from GCS -> job sync -> publish -> push back
-  index.html        generated dashboard (gitignored)
-tests/              test_warehouse_*.py  (48 tests)
+  DESIGN.md               this doc
+  build.py                a store's warehouse -> self-contained HTML (+ data.json); --store mason
+  publish.sh              build both pages + upload to the GCS site bucket
+  refresh.sh              main store's full cycle: pull db -> job sync -> publish -> push back
+tests/{core,cloud,sqlite_extract,dashboard}/
 ```
 
-Dependency direction: `warehouse/` imports `LifesaverClient` + `parse_work_order_csv`
-from `lifesaver/`; `dashboard/build.py` imports `warehouse.models.CALC_VERSION`
-and otherwise reads `warehouse.db` directly. One way, no cycles.
+Dependency direction: `cloud/warehouse/` and `sqlite_extract/` import `core/`;
+`core/` imports neither. `dashboard/build.py` imports `core.models.CALC_VERSION`
+and two checkpoint key names from `sqlite_extract.importer`; otherwise it reads a
+store's SQLite file directly. One way, no cycles.
 
 All analytics (`identity`, `visits`, `kpis`) are pure functions over dataclasses —
 no I/O, no SQL — so they are fully unit-tested and the storage engine can change
