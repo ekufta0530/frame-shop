@@ -2,8 +2,9 @@ import sqlite3
 
 import pytest
 
-from dashboard.build import load, render
+from core.stores import Store
 from sqlite_extract.importer import import_store
+from webapp.views import ViewConfig, store_view
 
 ORDERS = [
     # wo_no, cust_no, order_date, subtotal, status
@@ -57,16 +58,14 @@ def test_reimport_replaces_rather_than_appends(src, tmp_path):
     assert c.execute("SELECT COUNT(*) FROM visits").fetchone()[0] == 4
 
 
-def test_mason_page_uses_data_date_and_fitted_ceilings(src, tmp_path):
+def test_store_view_uses_the_data_date_as_today(src, tmp_path):
     import_store(src, tmp_path / "w.db")
-    data = load(str(tmp_path / "w.db"), "mason")
-    assert data["current_month"] == "2025-03"
-    assert data["store"]["snapshot"] is True
-    assert data["business"]["partial_day"] == 4
-    assert data["business"]["outlier"]["total_v"] == 0
-    assert data["summary"]["work_orders"] == 6
-
-    html = render(data)
-    assert '<a href="mason.html" aria-current="page">' in html
-    assert '<a href="index.html">' in html
-    assert "Polaris" not in html.split("<script>")[0]
+    store = Store(id="mason", name="Mason", tier="on-prem", data="x")
+    from webapp.data import read_data_through
+    through = read_data_through(tmp_path / "w.db")
+    d = store_view(ViewConfig.of(store), tmp_path / "w.db", through)
+    assert d["current_month"] == "2025-03"
+    assert d["store"]["data_through"] == "2025-03-04"
+    assert d["business"]["partial_day"] == 4
+    assert d["business"]["outlier"]["total_v"] == 0
+    assert d["summary"]["work_orders"] == 6

@@ -109,3 +109,29 @@ def build_visits(
     visits.sort(key=lambda v: (v.customer_id, v.visit_date))
     lifecycles.sort(key=lambda c: c.customer_id)
     return visits, lifecycles
+
+
+def lifecycles_from_visits(visits: Iterable[Visit]) -> list[CustomerLifecycle]:
+    """Re-derive ``customer_lifecycle`` from already-ranked visits (e.g. after
+    pooling several stores' visits or cutting them off at a date)."""
+    per_customer: dict[str, list[Visit]] = defaultdict(list)
+    for v in visits:
+        per_customer[v.customer_id].append(v)
+    out = []
+    for customer_id, cvisits in per_customer.items():
+        cvisits.sort(key=lambda v: v.visit_date)
+        first = cvisits[0].visit_date
+        second = cvisits[1].visit_date if len(cvisits) > 1 else None
+        out.append(
+            CustomerLifecycle(
+                customer_id=customer_id,
+                first_visit_date=first,
+                second_visit_date=second,
+                last_visit_date=cvisits[-1].visit_date,
+                lifetime_visits=len(cvisits),
+                lifetime_revenue=round(sum(v.revenue for v in cvisits), 2),
+                days_first_to_second=None if second is None else (second - first).days,
+            )
+        )
+    out.sort(key=lambda c: c.customer_id)
+    return out

@@ -1,0 +1,62 @@
+# Every store the website and the data pipelines know about.
+#
+# Two tiers:
+#   cloud    -- runs on Lifesaver Cloud (lsscloud.com). refresh.yml pulls its Work
+#               Order List report daily into gs://lifesaver-kpi-warehouse/stores/<id>/.
+#   on-prem  -- runs LifeSaver on its own machine. The owner uploads the database
+#               files; the site reads the resulting lifesaver.sqlite and, on top of
+#               the cloud-style dashboard, shows the deeper on-prem sections.
+#
+# ADDING A CLOUD STORE is two steps, no code:
+#   1. add a [[store]] block below with id, name and tier = "cloud"
+#   2. store its lsscloud login in Secret Manager as lifesaver-store-<id>:
+#        echo -n '{"username": "...", "password": "..."}' | \
+#          gcloud secrets create lifesaver-store-<id> --project=mcps-507817 --data-file=-
+#      then run the "refresh store data" workflow once with backfill ticked
+#      (cloud/DEPLOY.md §9 has the details).
+#
+# Optional per-store keys (all have sensible defaults):
+#   data        -- where the store's data lives (gs:// or a local path). Defaults:
+#                  cloud    gs://lifesaver-kpi-warehouse/stores/<id>/warehouse.db
+#                  on-prem  required -- the published lifesaver.sqlite
+#   secret      -- Secret Manager name of a cloud store's login (default lifesaver-store-<id>)
+#   chart_from  -- first month (YYYY-MM) on the monthly charts (default: first month of data)
+#   plot_from   -- { cohort = "YYYY-MM", trailing = "YYYY-MM" }: first month worth plotting for
+#                  the cohort KPIs (first->second, median days, reactivation) and the
+#                  trailing-12 KPIs (repeat share, active customers). Default: 16 and 3
+#                  months after the first month of data.
+#   baselines   -- { <kpi> = value }: a reference line on that KPI's chart
+#   outliers    -- visit ids ("<customer_id>:<YYYY-MM-DD>") the "exclude outlier" toggle removes
+#   outlier_label
+#   notes       -- extra bullets for the store's "How these are built" section
+#
+# Order matters: it is the order stores appear in, and it fixes each store's chart colour.
+# Run `python -m core.stores` to check this file.
+
+[[store]]
+id = "main"
+name = "Main store"
+tier = "cloud"
+chart_from = "2024-08"
+plot_from = { cohort = "2025-09", trailing = "2024-08" }
+baselines = { first_to_second_rate = 0.192, repeat_revenue_share = 0.273, median_days_to_second = 97, active_customers_ttm = 365 }
+outliers = ["c781adfa3958:2024-10-05", "c781adfa3958:2024-11-06"]
+outlier_label = "Polaris Mission commission"
+notes = [
+  "The store opened on Lifesaver in May 2024 (invoice #1 is a test order), so there is no earlier history to be missing.",
+  "Customers are matched by name, since the cloud report has no customer number.",
+  "The Polaris Mission toggle removes two Oct–Nov 2024 commissions for a SpaceX program (~$39.5k combined) from last-year figures. Left in, they make comparisons that reach back to late 2024 look like a sharp drop.",
+]
+
+[[store]]
+id = "mason"
+name = "Mason"
+tier = "on-prem"
+data = "gs://mcps-507817-lifesaver-data/lifesaver.sqlite"
+chart_from = "2015-06"
+plot_from = { cohort = "2017-06", trailing = "2016-05" }
+notes = [
+  "LifeSaver history starts June 2015. Customers who shopped before then look new in 2015–16, so cohort charts start mid-2017 and trailing-12 charts mid-2016.",
+  "Customers are LifeSaver customer numbers, so the same person is matched across years without relying on how their name was typed.",
+  "Figures come from the owner's latest upload of the LifeSaver database, not a daily feed: the newest order date in that copy is treated as today.",
+]

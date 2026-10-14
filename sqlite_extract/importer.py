@@ -28,12 +28,8 @@ from pathlib import Path
 from core.config import get_kpi_settings
 from core.kpis import compute_kpis
 from core.months import iter_months
-from core.store import Warehouse
+from core.store import DATA_THROUGH, SOURCE_WORK_ORDERS, Warehouse
 from core.visits import LineForVisit, build_visits
-
-# sync_checkpoints keys the dashboard reads back
-DATA_THROUGH = "data_through"
-SOURCE_WORK_ORDERS = "source_work_orders"
 
 
 def read_work_orders(src: str | Path) -> list[LineForVisit]:

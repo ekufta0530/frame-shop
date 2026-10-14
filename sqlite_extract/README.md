@@ -5,18 +5,19 @@ Lifesaver Cloud. Its history (June 2015 on) can't be scraped. Instead, the owner
 uploads a copy of their LifeSaver folder, and this package turns it into:
 
 - **`lifesaver.sqlite`** in `gs://mcps-507817-lifesaver-data/`: clean tables and
-  views over the POS data. This is the live dataset for Mason's SQL MCP server and
-  web report builder ([`mason_reports/`](../mason_reports/)). Both re-read it within
-  10 minutes of a publish.
-- **`mason.db`**: the same `core` KPI tables the main store has (`visits`,
-  `customer_lifecycle`, `kpi_monthly`). These render the dashboard's Mason tab
-  (`mason.html`).
+  views over the POS data. This is the live dataset for the website
+  ([`webapp/`](../webapp/): the Mason dashboard, in-store detail and report builder)
+  and Mason's SQL MCP server ([`mason_reports/`](../mason_reports/)). Both re-read it
+  within 10 minutes of a publish.
+- **`mason.db`**: the same `core` KPI tables the cloud stores have (`visits`,
+  `customer_lifecycle`, `kpi_monthly`), derived from the sqlite by the website
+  itself whenever a new copy appears (a second or so). It is never stored.
 
 ```
 owner's Drive upload ─▶ drive.py ─▶ extract.py ─▶ ingest.py checks ─▶ gs://…/lifesaver.sqlite
  (zip or folder)        (download    (9 .dbf/.fpt    (not older/smaller       │
                          newest)      → SQLite)       than live)              ▼
-                                                     dashboard/publish.sh: importer.py ─▶ mason.db ─▶ mason.html
+                                                     the website (webapp.data): importer.py ─▶ mason.db ─▶ Mason dashboard
 ```
 
 No lsscloud.com login and no raw/line-item layers: the extract *is* the raw
@@ -30,7 +31,7 @@ layer, and both outputs are rebuilt from scratch on every run.
 | `extract.py` | `.dbf`/`.fpt` files (a folder, or a zip) → `lifesaver.sqlite`. Of the 8k+ files in a LifeSaver install, only the 9 in `extract.NEEDED` are read. A zip is never unpacked wholesale; only those members are copied out, under flat lowercase names. |
 | `ingest.py` | The two steps `ingest.sh` calls: `check` (is there a new, finished upload?) and `run` (download → extract → compare with live → write `state.json`). |
 | `ingest.sh` | Wraps `ingest.py` with the GCS reads/writes. This is what [`mason-ingest.yml`](../.github/workflows/mason-ingest.yml) runs every 6 hours. |
-| `importer.py` | `lifesaver.sqlite` → `mason.db` through the shared `core.visits.build_visits` + `core.kpis.compute_kpis`. [`dashboard/publish.sh`](../dashboard/publish.sh) runs it on every publish. |
+| `importer.py` | `lifesaver.sqlite` → `mason.db` through the shared `core.visits.build_visits` + `core.kpis.compute_kpis`. [`webapp/data.py`](../webapp/data.py) runs it whenever a new `lifesaver.sqlite` appears. |
 
 ## The ingest, step by step
 
@@ -52,7 +53,7 @@ layer, and both outputs are rebuilt from scratch on every run.
    This stops an old backup or a partial copy from replacing good data.
 6. **Publish** (`ingest.sh`): source tables → `raw/<ts>/`, current live copy →
    `archive/lifesaver-<ts>.sqlite`, new file → `lifesaver.sqlite`. Then the
-   workflow runs `dashboard/publish.sh` to re-render the Mason tab.
+   website re-reads the file within ten minutes and re-derives the KPI tables itself.
 7. **Record.** `ingest/state.json` is written last, so a failed GCS publish
    leaves the old state and the next run retries.
 
@@ -61,7 +62,7 @@ Exit status and what the workflow run shows:
 | Situation | Run | `state.json` |
 |---|---|---|
 | no upload / nothing new / still uploading | ✅ green, dashboard step skipped | unchanged |
-| published | ✅ green, dashboard republished | `outcome: published` |
+| published | ✅ green, site picks it up within 10 min | `outcome: published` |
 | rejected (bad upload or failed checks) | ❌ **red once**, then green on later runs (same key is skipped) | `outcome: rejected`, `detail` says why |
 | Drive/network/GCS error | ❌ red | unchanged, so the next run retries |
 
@@ -97,9 +98,8 @@ gcloud storage ls $B/archive/
 gcloud storage cp $B/archive/lifesaver-<ts>.sqlite $B/lifesaver.sqlite
 ```
 
-Then **Actions → refresh dashboard data → Run workflow** to re-render the
-Mason tab. Its `publish.sh` step rebuilds both pages. (**build & deploy**
-won't work here: its dashboard job only runs on a push.) The SQL MCP server picks up the change by itself. The next upload
+The website and the SQL MCP server pick up the restored file by themselves
+within 10 minutes. The next upload
 the owner makes is still compared against whatever is live.
 
 **Run locally** (needs permission to impersonate `gha-deployer`): see the end

@@ -25,6 +25,10 @@ from pathlib import Path
 from .models import CALC_VERSION, CustomerLifecycle, KpiSnapshot
 from .visits import Visit
 
+# sync_checkpoints keys every store's warehouse records, whatever its source
+DATA_THROUGH = "data_through"  # ISO date the data is complete through ("today" for the KPIs)
+SOURCE_WORK_ORDERS = "source_work_orders"  # work orders in the source, for display
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS visits (
     visit_id             TEXT PRIMARY KEY,
@@ -90,8 +94,14 @@ def _date(s: str | None) -> date | None:
 class Warehouse:
     SCHEMA = SCHEMA
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, readonly: bool = False) -> None:
+        """``readonly`` opens an existing file without touching it (no WAL switch, no schema
+        creation), so it works on a read-only file and leaves no -wal/-shm files behind."""
         self._path = str(db_path)
+        if readonly:
+            self._conn = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True)
+            self._conn.row_factory = sqlite3.Row
+            return
         self._conn = sqlite3.connect(self._path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")

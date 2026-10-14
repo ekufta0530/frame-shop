@@ -17,6 +17,7 @@ from cloud.lifesaver.reports import get_report
 from core.kpis import compute_kpis
 from core.models import KpiSnapshot
 from core.months import add_months, iter_months, month_start
+from core.store import DATA_THROUGH
 from core.visits import build_visits
 
 from . import identity
@@ -141,6 +142,8 @@ def refresh(
             cohort_window_months=settings.warehouse_cohort_window_months,
         )
         written += wh.upsert_kpi_snapshots(snaps)
+    # the site reads this as the store's "today": a sync pulls through today
+    wh.set_checkpoint(DATA_THROUGH, today.isoformat())
     return result, written
 
 

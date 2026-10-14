@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pick up the Mason owner's latest LifeSaver upload from the shared Drive
 # folder and, if it is new and passes the checks, publish it as the live
-# lifesaver.sqlite (which the SQL MCP server and dashboard/publish.sh read).
+# lifesaver.sqlite (which the website and the SQL MCP server read).
 # See sqlite_extract/ingest.py for what "new" and "passes" mean.
 #
 #   DRIVE_FOLDER_ID=... DRIVE_TOKEN=$(gcloud auth print-access-token ...) sqlite_extract/ingest.sh
