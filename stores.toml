@@ -35,7 +35,7 @@
 
 [[store]]
 id = "main"
-name = "Main store"
+name = "Dan's Camera City"
 tier = "cloud"
 chart_from = "2024-08"
 plot_from = { cohort = "2025-09", trailing = "2024-08" }
@@ -50,7 +50,7 @@ notes = [
 
 [[store]]
 id = "mason"
-name = "Mason"
+name = "Wheaton's"
 tier = "on-prem"
 data = "gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite"
 chart_from = "2015-06"
