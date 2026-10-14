@@ -3,13 +3,15 @@
 One site for every store: **Overview** (stores side by side + all stores pooled), a **dashboard per
 store**, and for on-prem stores an **in-store detail** section and a **Reports** tab (report builder +
 SQL console). React + Vite frontend (`frontend/`), FastAPI backend (`server.py`), one container
-(`Dockerfile`), Cloud Run service `frame-shop` in us-west1.
+(`Dockerfile`), Cloud Run service `frame-shop` in us-west1. The same service is also the **MCP server**
+for Claude over every store (`/mcp/<token>`, see [Claude connector](#claude-connector-mcp)).
 
 ```
 stores.toml ──▶ webapp.data.DataManager ──▶ webapp.views / insights ──▶ /api/* ──▶ React
                   │  cloud:   gs://frame-shop-511616-kpi-warehouse/stores/<id>/warehouse.db   (refresh.yml, daily)
                   │  on-prem: gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite        (mason-ingest.yml)
-                  └─ + pooled "all stores" warehouse   (core.aggregate, rebuilt only when a store's data changes)
+                  ├─ + pooled "all stores" warehouse   (core.aggregate, rebuilt only when a store's data changes)
+                  └─ + reports DBs: each store's + pooled (lsreports.build) ──▶ Reports tab, /mcp
 ```
 
 ## The two tiers
@@ -66,6 +68,8 @@ STORE_MAIN_DATA=warehouse.db STORE_MASON_DATA=mason_reports/lifesaver.sqlite AUT
 
 `STORE_<ID>_DATA` overrides one store's data location (id upper-cased, `-` → `_`).
 `CACHE_DIR` is where downloaded/derived files go (default: system temp).
+The MCP endpoint is `http://localhost:8765/mcp/<token>`: set `MCP_TOKEN=dev` for `/mcp/dev`, otherwise
+the server logs a random one at startup.
 
 ## Deploy
 
@@ -117,6 +121,45 @@ gcloud storage buckets update gs://lifesaver-kpi-dashboard-303f74 --public-acces
 # later, once you're sure nothing needs it:  gcloud storage rm -r gs://lifesaver-kpi-dashboard-303f74
 ```
 
+## Claude connector (MCP)
+
+`mcp_server.py` serves the tools Claude uses, at `/mcp/<token>` on the same service:
+
+| Tool | What |
+|---|---|
+| `list_stores` | every store, its tier, how current its data is, and what it can answer; plus `all` |
+| `get_catalog(store)` | that store's datasets, dimensions, metrics and presets |
+| `run_report`, `run_preset`, `find_values` | the report builder's query layer (`lsreports.semantic`) |
+| `get_kpis(store)` | the dashboard's five retention KPIs by month, from the same code as the charts |
+| `get_schema`, `run_sql` | read-only SQL on one store's reports DB (or `all`) |
+
+Every tool takes `store`: an id from `stores.toml` or `all`. It only reads the data manager's copies,
+never lsscloud.com, so cloud data is as fresh as the last `refresh.yml` run.
+
+What a store can answer depends on its data (`lsreports.semantic` *levels*):
+
+- **on-prem** queries its `lifesaver.sqlite`: everything, including salesperson, components, vendors,
+  cost/margin and tax.
+- **cloud** queries a copy of its `warehouse.db` with a `wo_facts` table rolled up from the Work Order
+  List line items (`lsreports.build`): customers, dates, status, list price and discount. Sales =
+  `retail − discount` over non-void lines, the same as the KPIs.
+- **all** queries one pooled `wo_facts` with a `store` column: the fields every store has, cut off at the
+  oldest store's data-through date like the pooled warehouse, customers counted per store.
+
+Asking for a field a store lacks returns an error saying so. A store whose reports DB can't be built
+keeps its dashboard and is left out of `all`.
+
+```bash
+webapp/deploy.sh                 # first run creates the token (secret frame-shop-mcp-token)
+webapp/mcp_url.sh                # prints the connector URL
+webapp/deploy.sh --rotate-mcp    # new token; existing connector URLs stop working
+```
+
+In claude.ai: Settings → Connectors → Add custom connector, paste the URL, leave the OAuth fields empty.
+For Claude Code: `claude mcp add --transport http frame-shop "<url>"`. There is no OAuth: the URL is the
+credential (it also appears in Cloud Run's request logs), so treat it like a password. Wrong or missing
+tokens get a 404; without `MCP_TOKEN` on Cloud Run the endpoint is off and the site runs as usual.
+
 ## Checks
 
 ```bash
@@ -135,7 +178,8 @@ CI runs both before it builds an image, and deploys the image tagged with the co
 | `insights.py` | the on-prem "in-store detail" reports (specs run through `lsreports.semantic`) |
 | `auth.py`, `users.py`, `manage_users.py`, `users.sh` | Google sign-in, the email allowlist |
 | `frontend/` | React + TypeScript + Recharts. `src/charts.tsx` holds every chart; `src/styles.css` the design tokens |
-| `../lsreports/` | the report builder's query layer, shared with `mason_reports/` (the claude.ai SQL connector) |
+| `mcp_server.py` | the MCP server for Claude, mounted at `/mcp` (see above) |
+| `../lsreports/` | the query layer behind the Reports tab and the MCP tools; `build.py` makes the cloud and pooled reports DBs |
 | `../core/stores.py`, `../core/aggregate.py` | the store registry and the pooled warehouse |
 
 ## Design notes

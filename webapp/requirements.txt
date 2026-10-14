@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30
 pydantic>=2.7
 pydantic-settings>=2.3
 google-cloud-storage>=2.19
+mcp>=2.1

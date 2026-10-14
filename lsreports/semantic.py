@@ -6,53 +6,71 @@ A report spec is plain JSON so the web UI and the MCP server can share it:
    "filters": [{"field": "salesperson", "op": "in", "value": ["ECP"]}],
    "sort": {"field": "sales", "dir": "desc"}, "limit": 100}
 Only whitelisted names reach SQL; all values are bound parameters.
+
+Not every database has every field. A report runs at one *level*:
+  full    -- an on-prem store's lifesaver.sqlite: everything below
+  basic   -- a cloud store's reports DB (lsreports.build): only what the Work Order List
+             report carries -- no salesperson, components, cost, tax or turnaround
+  pooled  -- all stores in one table: the basic fields plus a "store" dimension
+Each dimension, metric and dataset lists the levels that have it; asking for one a level
+lacks is a SpecError that says so.
 """
 import datetime as dt
 
 from . import db
 
 D = 'order_date'
+
+FULL, BASIC, POOLED = 'full', 'basic', 'pooled'
+LEVELS = (FULL, BASIC, POOLED)
+ANY = frozenset(LEVELS)
+ONLY_FULL = frozenset({FULL})
+LEVEL_NOTES = {
+    BASIC: 'cloud stores only have the Work Order List report (no salesperson, components, cost, '
+           'tax, customer address or turnaround)',
+    POOLED: 'the all-stores view only has the fields every store has',
+}
 MONTHS = 'JanFebMarAprMayJunJulAugSepOctNovDec'
 
 
-def _dim(label, sql, kind='category'):
-    return {'label': label, 'sql': sql, 'kind': kind}
+def _dim(label, sql, kind='category', levels=ONLY_FULL):
+    return {'label': label, 'sql': sql, 'kind': kind, 'levels': levels}
 
 
-def _met(label, sql, fmt):
-    return {'label': label, 'sql': sql, 'format': fmt}
+def _met(label, sql, fmt, levels=ONLY_FULL):
+    return {'label': label, 'sql': sql, 'format': fmt, 'levels': levels}
 
 
 COMMON_DIMS = {
-    'year': _dim('Year', f"strftime('%Y', {D})", 'time'),
-    'quarter': _dim('Quarter', f"strftime('%Y', {D}) || '-Q' || ((CAST(strftime('%m', {D}) AS INT) + 2) / 3)", 'time'),
-    'month': _dim('Month', f"strftime('%Y-%m', {D})", 'time'),
+    'year': _dim('Year', f"strftime('%Y', {D})", 'time', levels=ANY),
+    'quarter': _dim('Quarter', f"strftime('%Y', {D}) || '-Q' || ((CAST(strftime('%m', {D}) AS INT) + 2) / 3)", 'time', levels=ANY),
+    'month': _dim('Month', f"strftime('%Y-%m', {D})", 'time', levels=ANY),
     'month_of_year': _dim('Month of year', f"strftime('%m', {D}) || ' ' || "
-                          f"substr('{MONTHS}', CAST(strftime('%m', {D}) AS INT) * 3 - 2, 3)", 'cyclic'),
+                          f"substr('{MONTHS}', CAST(strftime('%m', {D}) AS INT) * 3 - 2, 3)", 'cyclic', levels=ANY),
     'weekday': _dim('Weekday', f"strftime('%w', {D}) || ' ' || "
-                    f"substr('SunMonTueWedThuFriSat', CAST(strftime('%w', {D}) AS INT) * 3 + 1, 3)", 'cyclic'),
-    'order_date': _dim('Order date', D, 'date'),
-    'promised_date': _dim('Promised date', 'promised_date', 'date'),
+                    f"substr('SunMonTueWedThuFriSat', CAST(strftime('%w', {D}) AS INT) * 3 + 1, 3)", 'cyclic', levels=ANY),
+    'order_date': _dim('Order date', D, 'date', levels=ANY),
+    'promised_date': _dim('Promised date', 'promised_date', 'date', levels=ANY),
     'done_date': _dim('Done date', 'done_date', 'date'),
     'salesperson': _dim('Salesperson', 'salesperson'),
-    'status': _dim('Status', 'status'),
-    'customer_type': _dim('New vs returning', 'customer_type'),
-    'customer_name': _dim('Customer', 'customer_name', 'text'),
+    'status': _dim('Status', 'status', levels=ANY),
+    'customer_type': _dim('New vs returning', 'customer_type', levels=ANY),
+    'customer_name': _dim('Customer', 'customer_name', 'text', levels=ANY),
     'company': _dim('Company', "coalesce(company, '')", 'text'),
     'customer_city': _dim('Customer city', "coalesce(customer_city, '')"),
     'customer_zip': _dim('Customer ZIP', "coalesce(customer_zip, '')"),
     'price_band': _dim('Ticket size', "CASE WHEN subtotal < 100 THEN '1 Under $100' "
                        "WHEN subtotal < 250 THEN '2 $100-249' WHEN subtotal < 500 THEN '3 $250-499' "
-                       "WHEN subtotal < 1000 THEN '4 $500-999' ELSE '5 $1,000+' END", 'ordinal'),
+                       "WHEN subtotal < 1000 THEN '4 $500-999' ELSE '5 $1,000+' END", 'ordinal', levels=ANY),
     'turnaround_band': _dim('Turnaround', "CASE WHEN days_to_done IS NULL THEN '9 Not done' "
                             "WHEN days_to_done <= 7 THEN '1 0-7 days' WHEN days_to_done <= 14 THEN '2 8-14 days' "
                             "WHEN days_to_done <= 30 THEN '3 15-30 days' WHEN days_to_done <= 60 THEN '4 31-60 days' "
                             "ELSE '5 60+ days' END", 'ordinal'),
     'discount_code': _dim('Discount code', "coalesce(discount_code, '(none)')"),
-    'wo_no': _dim('Work order #', 'wo_no', 'id'),
-    'invoice_no': _dim('Invoice #', 'invoice_no', 'id'),
-    'cust_no': _dim('Customer #', 'cust_no', 'id'),
-    'description': _dim('Description', 'description', 'text'),
+    'wo_no': _dim('Work order #', 'wo_no', 'id', levels=ANY),
+    'invoice_no': _dim('Invoice #', 'invoice_no', 'id', levels=ANY),
+    'cust_no': _dim('Customer #', 'cust_no', 'id', levels=ANY),
+    'description': _dim('Description', 'description', 'text', levels=ANY),
 }
 
 DATASETS = {
@@ -61,20 +79,21 @@ DATASETS = {
         'table': 'wo_facts',
         'description': 'One row per work order (latest revision). Money is pre-tax unless noted. '
                        'Voided work orders are excluded unless include_void is true.',
-        'dimensions': COMMON_DIMS,
+        'levels': ANY,
+        'dimensions': {'store': _dim('Store', 'store', levels=frozenset({POOLED})), **COMMON_DIMS},
         'metrics': {
-            'jobs': _met('Jobs', 'COUNT(*)', 'int'),
-            'sales': _met('Sales', 'SUM(subtotal)', 'money'),
-            'avg_ticket': _met('Avg ticket', 'AVG(subtotal)', 'money'),
+            'jobs': _met('Jobs', 'COUNT(*)', 'int', ANY),
+            'sales': _met('Sales', 'SUM(subtotal)', 'money', ANY),
+            'avg_ticket': _met('Avg ticket', 'AVG(subtotal)', 'money', ANY),
             'total_with_tax': _met('Total incl. tax', 'SUM(total)', 'money'),
             # only moulding/mat/fillet carry a real cost in LifeSaver (see sqlite_extract/extract.py at the repo root)
             'known_cost': _met('Moulding & mat cost', 'SUM(known_cost)', 'money'),
             'mm_margin_pct': _met('Moulding & mat margin %', '100.0 * SUM(known_cost_sales - known_cost) '
                                   '/ NULLIF(SUM(known_cost_sales), 0)', 'pct'),
-            'discounts': _met('Discounts', 'SUM(discount_amt)', 'money'),
-            'discount_pct': _met('Discount %', '100.0 * SUM(discount_amt) / NULLIF(SUM(list_subtotal), 0)', 'pct'),
+            'discounts': _met('Discounts', 'SUM(discount_amt)', 'money', ANY),
+            'discount_pct': _met('Discount %', '100.0 * SUM(discount_amt) / NULLIF(SUM(list_subtotal), 0)', 'pct', ANY),
             'avg_days_to_done': _met('Avg days to done', 'AVG(days_to_done)', 'num1'),
-            'customers': _met('Customers', 'COUNT(DISTINCT cust_no)', 'int'),
+            'customers': _met('Customers', 'COUNT(DISTINCT cust_no)', 'int', ANY),
             'moulding_sales': _met('Moulding sales', 'SUM(moulding_price)', 'money'),
             'mat_sales': _met('Mat sales', 'SUM(mat_price)', 'money'),
             'glass_sales': _met('Glazing sales', 'SUM(glass_price)', 'money'),
@@ -87,6 +106,7 @@ DATASETS = {
         'description': 'One row per material/service on a work order (moulding, mat, glazing, mounting, '
                        'stretching, fillet, special). Prices are net of discount. Cost/margin exist only '
                        'for moulding, mat and fillet; LifeSaver does not record true cost for the rest.',
+        'levels': ONLY_FULL,
         'dimensions': {
             'comp_kind': _dim('Component type', 'comp_kind'),
             'comp_vendor': _dim('Vendor', 'comp_vendor'),
@@ -117,12 +137,53 @@ class SpecError(ValueError):
     pass
 
 
-def catalog():
-    """JSON-safe description of datasets for UIs and LLM tools."""
+def catalog(level=FULL):
+    """JSON-safe description of the datasets a ``level`` has, for UIs and LLM tools."""
     return {name: {'label': ds['label'], 'description': ds['description'],
-                   'dimensions': {k: {'label': v['label'], 'kind': v['kind']} for k, v in ds['dimensions'].items()},
-                   'metrics': {k: {'label': v['label'], 'format': v['format']} for k, v in ds['metrics'].items()}}
-            for name, ds in DATASETS.items()}
+                   'dimensions': {k: {'label': v['label'], 'kind': v['kind']}
+                                  for k, v in ds['dimensions'].items() if level in v['levels']},
+                   'metrics': {k: {'label': v['label'], 'format': v['format']}
+                               for k, v in ds['metrics'].items() if level in v['levels']}}
+            for name, ds in DATASETS.items() if level in ds['levels']}
+
+
+def _missing(what, key, level):
+    note = LEVEL_NOTES.get(level)
+    return SpecError(f'{what} {key!r} is not available here' + (f': {note}' if note else ''))
+
+
+def _dataset(name, level):
+    ds = DATASETS.get(name)
+    if not ds:
+        raise SpecError(f'unknown dataset {name!r}')
+    if level not in ds['levels']:
+        raise _missing('dataset', name, level)
+    return ds
+
+
+def _field(ds, kind, key, level):
+    """The dimension or metric ``key``, if this level has it."""
+    f = ds[kind].get(key)
+    if f is None:
+        raise SpecError(f'unknown {kind[:-1]} {key!r}')
+    if level not in f['levels']:
+        raise _missing(kind[:-1], key, level)
+    return f
+
+
+def fits(spec, level):
+    """Whether a report spec only uses what ``level`` has (used to offer presets)."""
+    try:
+        ds = _dataset(spec.get('dataset', 'work_orders'), level)
+        for d in spec.get('dimensions') or []:
+            _field(ds, 'dimensions', d, level)
+        for m in spec.get('metrics') or []:
+            _field(ds, 'metrics', m, level)
+        for f in spec.get('filters') or []:
+            _field(ds, 'dimensions', f.get('field'), level)
+    except SpecError:
+        return False
+    return True
 
 
 def _resolve(value):
@@ -131,7 +192,7 @@ def _resolve(value):
     return value
 
 
-def _where(ds, spec):
+def _where(ds, spec, level):
     clauses, params = [], []
     if not spec.get('include_void'):
         clauses.append("status != 'Void'")
@@ -142,10 +203,10 @@ def _where(ds, spec):
         clauses.append(f'{D} <= ?')
         params.append(spec['date_to'])
     for f in spec.get('filters') or []:
-        dim = ds['dimensions'].get(f.get('field'))
         op = OPS.get(f.get('op', 'in'))
-        if not dim or not op:
+        if not op:
             raise SpecError(f'bad filter: {f}')
+        dim = _field(ds, 'dimensions', f.get('field'), level)
         val = f.get('value')
         if op in ('IN', 'NOT IN'):
             vals = val if isinstance(val, list) else [val]
@@ -162,22 +223,18 @@ def _where(ds, spec):
     return (' WHERE ' + ' AND '.join(clauses)) if clauses else '', params
 
 
-def run_report(spec):
-    ds = DATASETS.get(spec.get('dataset', 'work_orders'))
-    if not ds:
-        raise SpecError(f"unknown dataset {spec.get('dataset')!r}")
+def run_report(spec, level=FULL):
+    ds = _dataset(spec.get('dataset', 'work_orders'), level)
     dims = spec.get('dimensions') or []
     mets = spec.get('metrics') or []
     for d in dims:
-        if d not in ds['dimensions']:
-            raise SpecError(f'unknown dimension {d!r}')
+        _field(ds, 'dimensions', d, level)
     for m in mets:
-        if m not in ds['metrics']:
-            raise SpecError(f'unknown metric {m!r}')
+        _field(ds, 'metrics', m, level)
     if not mets:
         raise SpecError('pick at least one metric')
 
-    where, params = _where(ds, spec)
+    where, params = _where(ds, spec, level)
     select = [f"{ds['dimensions'][d]['sql']} AS \"{d}\"" for d in dims]
     select += [f"{ds['metrics'][m]['sql']} AS \"{m}\"" for m in mets]
     sql = f"SELECT {', '.join(select)} FROM {ds['table']}{where}"
@@ -213,11 +270,9 @@ def run_report(spec):
             'sql': sql, 'params': params}
 
 
-def dimension_values(dataset, dim, search=None, limit=200):
-    ds = DATASETS.get(dataset)
-    if not ds or dim not in ds['dimensions']:
-        raise SpecError('unknown dimension')
-    expr = ds['dimensions'][dim]['sql']
+def dimension_values(dataset, dim, search=None, limit=200, level=FULL):
+    ds = _dataset(dataset, level)
+    expr = _field(ds, 'dimensions', dim, level)['sql']
     where, params = f' WHERE {expr} IS NOT NULL', []
     if search:
         where += f' AND {expr} LIKE ?'

@@ -1,4 +1,10 @@
-"""Ready-made reports. Each is a report spec plus how to chart it."""
+"""Ready-made reports. Each is a report spec plus how to chart it.
+
+A preset is offered wherever its spec fits (see ``for_level``): on an on-prem store all of the
+single-store ones, on a cloud store only those built from Work Order List fields, and on the
+all-stores view those plus the store comparisons.
+"""
+from . import semantic
 
 
 def _p(id, title, description, spec, chart='bar', group='Sales'):
@@ -52,6 +58,14 @@ PRESETS = [
        {'dataset': 'components', 'dimensions': ['comp_kind'], 'metrics': ['net_sales', 'cost', 'margin', 'margin_pct'],
         'filters': [{'field': 'comp_kind', 'op': 'in', 'value': ['Moulding', 'Mat', 'Fillet']}]},
        'bar', 'Products'),
+    _p('by_store', 'Stores compared', 'Jobs, sales, average ticket and customers per store.',
+       {'dimensions': ['store'], 'metrics': ['jobs', 'sales', 'avg_ticket', 'customers']}, 'bar', 'Stores'),
+    _p('store_monthly', 'Monthly sales by store', 'Sales and jobs by month for each store.',
+       {'dimensions': ['month', 'store'], 'metrics': ['sales', 'jobs']}, 'line', 'Stores'),
 ]
 
 BY_ID = {p['id']: p for p in PRESETS}
+
+
+def for_level(level):
+    return [p for p in PRESETS if semantic.fits(p['spec'], level)]

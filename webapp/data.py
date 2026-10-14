@@ -6,6 +6,11 @@ Per store (``stores.toml``):
   here with ``sqlite_extract.importer`` (under a second), and the report builder queries the
   sqlite itself.
 
+Reports (the report builder and the MCP server) query each store's ``reports_path``: an on-prem
+store's sqlite, or for a cloud store a copy of its warehouse with ``wo_facts`` added
+(``lsreports.build``). The snapshot also has a pooled all-stores reports DB. These are extras: a
+store whose reports DB can't be built still has its dashboard.
+
 GCS objects are re-checked at most every REFRESH_SECONDS and downloaded only when their
 generation changes; anything derived from them is rebuilt only then. A store whose data can't
 be read is reported as unavailable and left out of the all-stores figures -- one broken store
@@ -28,6 +33,8 @@ from pathlib import Path
 from core.aggregate import build_combined
 from core.store import DATA_THROUGH
 from core.stores import Store, load_stores
+from lsreports import semantic
+from lsreports.build import build_cloud_reports, build_pooled_reports
 from sqlite_extract.importer import import_store
 
 log = logging.getLogger(__name__)
@@ -42,12 +49,19 @@ class StoreData:
     generation: str | None = None  # changes whenever the source file does
     source_path: Path | None = None  # the downloaded file (warehouse.db or lifesaver.sqlite)
     warehouse_path: Path | None = None  # the core KPI warehouse
+    reports_path: Path | None = None  # what reports query (has wo_facts); see the module doc
     data_through: date | None = None
     error: str | None = None
+    reports_error: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.error is None and self.warehouse_path is not None
+
+    @property
+    def level(self) -> str:
+        """The semantic layer's level for this store's reports DB."""
+        return semantic.FULL if self.store.on_prem else semantic.BASIC
 
 
 @dataclass
@@ -55,6 +69,8 @@ class Snapshot:
     stores: list[StoreData]
     combined_path: Path | None = None
     combined_through: date | None = None
+    reports_path: Path | None = None  # pooled reports DB, cut off at combined_through
+    reports_error: str | None = None
     version: str = ""  # changes whenever any store's data does
     loaded_at: float = field(default_factory=time.time)
 
@@ -170,7 +186,26 @@ class DataManager:
                 if prev and prev.combined_path != dest:
                     self._retire(prev.combined_path)
             snap.combined_path, snap.combined_through = dest, through
+            self._pool_reports(snap, prev, [s for s in ok if s.reports_path is not None])
         return snap
+
+    def _pool_reports(self, snap: Snapshot, prev: Snapshot | None, stores: list[StoreData]) -> None:
+        if not stores:
+            return
+        dest = self._cache / f"reports-all-{snap.version}.db"
+        if prev and prev.version == snap.version and prev.reports_path and prev.reports_path.exists():
+            snap.reports_path = prev.reports_path
+            return
+        try:
+            build_pooled_reports([(s.store.id, s.store.name, s.reports_path) for s in stores], dest,
+                                 through=snap.combined_through)
+        except Exception as e:
+            log.exception("all-stores reports DB failed")
+            snap.reports_error = f"{type(e).__name__}: {e}"
+            return
+        snap.reports_path = dest
+        if prev and prev.reports_path != dest:
+            self._retire(prev.reports_path)
 
     def _load_store(self, store: Store, before: StoreData | None) -> StoreData:
         path, generation = self._fetch(store.data, before)
@@ -183,8 +218,19 @@ class DataManager:
             if not wh.exists():
                 import_store(path, wh)
             sd.warehouse_path = wh
+            sd.reports_path = path
         else:
             sd.warehouse_path = path
+            rp = self._cache / f"{_safe(store.id)}-{_safe(generation)}.reports.db"
+            try:
+                if not rp.exists():
+                    build_cloud_reports(path, rp)
+                sd.reports_path = rp
+            except Exception as e:
+                log.exception("store %s: reports DB failed", store.id)
+                sd.reports_error = f"{type(e).__name__}: {e}"
+            if before is not None and before.reports_path not in (None, sd.reports_path):
+                self._retire(before.reports_path)
         sd.data_through = read_data_through(sd.warehouse_path)
         if before is not None and before.warehouse_path != sd.warehouse_path:
             self._retire(before.warehouse_path)

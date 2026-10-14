@@ -9,3 +9,4 @@ WAREHOUSE_BUCKET="${WAREHOUSE_BUCKET:-${PROJECT}-kpi-warehouse}" # stores/<id>/w
 USERS_URI="gs://${DATA_BUCKET}/users.json"          # allowlist of Google accounts (manage with webapp/users.sh)
 OAUTH_SECRETS=(lifesaver-oauth-client-id lifesaver-oauth-client-secret)  # Google sign-in client (GOOGLE_CLIENT_ID / _SECRET)
 SESSION_SECRET_NAME="lifesaver-session-secret"      # Secret Manager secret that signs login cookies
+MCP_TOKEN_NAME="frame-shop-mcp-token"               # the MCP connector's access token (part of its URL)

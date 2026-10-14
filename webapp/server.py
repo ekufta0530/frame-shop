@@ -8,6 +8,7 @@ Pages (client-side routes, all served index.html):
     /stores/<id>/reports    report builder + SQL console (on-prem stores)
     /login
     /privacy, /terms        the public privacy policy and terms (served by the API, not the SPA)
+    /mcp/<token>            the MCP server for Claude (webapp/mcp_server.py; its own token, not the login)
 
 Data comes from ``webapp.data.manager`` (see there); payloads are cached until any store's data
 changes. Env: STORES_FILE, STORE_<ID>_DATA, USERS_URI, SESSION_SECRET, AUTH_DISABLED=1 (local).
@@ -30,6 +31,7 @@ from lsreports import db as lsdb
 from lsreports import presets, semantic
 
 from . import auth
+from . import mcp_server
 from .data import manager
 from .insights import insights
 from .legal import PRIVACY_HTML, TERMS_HTML
@@ -48,11 +50,13 @@ async def lifespan(_):
     except Exception:
         log.exception("initial data load failed; the first request will retry")
     manager.background = True
-    yield
+    async with mcp_server.running():
+        yield
 
 
 app = FastAPI(title="Frame Shop", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.middleware("http")(auth.auth_middleware)
+app.add_middleware(mcp_server.McpMount)  # added last = outermost: /mcp never reaches the login check
 app.include_router(auth.router)
 
 
@@ -161,7 +165,7 @@ def store_insights(store_id: str):
 def catalog(store_id: str):
     sd = _on_prem_or_404(manager.snapshot(), store_id)
     with lsdb.using(sd.source_path):
-        return {"datasets": semantic.catalog(), "presets": presets.PRESETS, "data": lsdb.data_info()}
+        return {"datasets": semantic.catalog(), "presets": presets.for_level(semantic.FULL), "data": lsdb.data_info()}
 
 
 @app.post("/api/stores/{store_id}/report")
