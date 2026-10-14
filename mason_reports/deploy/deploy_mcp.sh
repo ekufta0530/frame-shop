@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Deploy the MCP server (Claude connector) as its own Cloud Run service, next to the web app.
-# Run deploy_web.sh once first: this reuses its bucket, runtime service account and build account.
+# Deploy the SQL MCP server (Claude connector) as its own Cloud Run service. It reads the same
+# lifesaver.sqlite the website does. First run needs the data bucket, runtime service account and
+# build account (created when the project was first set up; the website has its own, webapp/deploy.sh).
 # Access is a random token in the connector URL (no OAuth); deploy/mcp_url.sh prints the URL.
 #   deploy/deploy_mcp.sh             # first run creates the token; later runs just redeploy
 #   deploy/deploy_mcp.sh --rotate    # new token: every existing connector URL stops working
@@ -19,11 +20,14 @@ fi
 retry gcloud secrets add-iam-policy-binding "$MCP_TOKEN_NAME" --project "$PROJECT" \
   --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor >/dev/null
 
-# Same image as the web app, different command. The token is read at instance start, so a rotation
+# The token is read at instance start, so a rotation
 # only takes effect with this redeploy (a new revision).
-gcloud run deploy "$MCP_SERVICE" --project "$PROJECT" --region "$REGION" --source . \
+# Stage a build dir: this app plus the repo's shared lsreports/ package (it lives outside this dir).
+STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
+cp -R Dockerfile requirements.txt mcp_server "$STAGE/"; cp -R ../lsreports "$STAGE/lsreports"
+find "$STAGE" -name __pycache__ -prune -exec rm -rf {} +
+gcloud run deploy "$MCP_SERVICE" --project "$PROJECT" --region "$REGION" --source "$STAGE" \
   --service-account "$RUNTIME_SA" --build-service-account "projects/$PROJECT/serviceAccounts/$BUILD_SA" \
-  --command uvicorn --args "mcp_server.main:app,--host=0.0.0.0,--port=8080,--proxy-headers" \
   --set-env-vars "DATA_URI=$DATA_URI" \
   --set-secrets "MCP_TOKEN=${MCP_TOKEN_NAME}:latest" \
   --allow-unauthenticated \

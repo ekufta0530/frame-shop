@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Create or update the website's Cloud Run service from the image publish.yml builds.
+# First run also creates the runtime service account and its read access to both buckets.
+# Access control is the app's own login (users.json in the data bucket), so the Cloud Run
+# service is public. Add people with webapp/users.sh before sharing the URL.
+#   webapp/deploy.sh
+set -euo pipefail
+cd "$(dirname "$0")"
+source config.sh
+
+retry() { for i in 1 2 3 4 5 6 7 8; do "$@" && return 0; echo "retrying in 10s..." >&2; sleep 10; done; return 1; }
+
+gcloud services enable run.googleapis.com secretmanager.googleapis.com --project "$PROJECT"
+
+gcloud iam service-accounts describe "$RUNTIME_SA" --project "$PROJECT" >/dev/null 2>&1 || \
+  gcloud iam service-accounts create frame-shop --project "$PROJECT" --display-name "Frame Shop website runtime"
+for b in "$DATA_BUCKET" "$WAREHOUSE_BUCKET"; do
+  retry gcloud storage buckets add-iam-policy-binding "gs://$b" \
+    --member "serviceAccount:$RUNTIME_SA" --role roles/storage.objectViewer >/dev/null
+done
+
+# The session secret already exists from the old report site; create it only if missing.
+gcloud secrets describe "$SESSION_SECRET_NAME" --project "$PROJECT" >/dev/null 2>&1 || \
+  python3 -c "import secrets; print(secrets.token_urlsafe(48), end='')" | \
+    gcloud secrets create "$SESSION_SECRET_NAME" --project "$PROJECT" --data-file=- --replication-policy automatic
+retry gcloud secrets add-iam-policy-binding "$SESSION_SECRET_NAME" --project "$PROJECT" \
+  --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor >/dev/null
+
+gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE" \
+  --service-account "$RUNTIME_SA" \
+  --set-env-vars "USERS_URI=$USERS_URI" \
+  --set-secrets "SESSION_SECRET=${SESSION_SECRET_NAME}:latest" \
+  --allow-unauthenticated \
+  --memory 1Gi --cpu 1 --min-instances 0 --max-instances 2 --quiet
+gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format 'value(status.url)'
