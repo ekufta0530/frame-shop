@@ -28,7 +28,7 @@ on:
         default: false
 
 env:
-  PROJECT: mcps-507817
+  PROJECT: frame-shop-511616
 
 jobs:
   plan:

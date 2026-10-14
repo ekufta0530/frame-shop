@@ -3,7 +3,7 @@
 Analytics over the Mason frame shop's LifeSaver POS (Visual FoxPro) data, for Claude. One Cloud
 Run service (us-west1), **`lifesaver-mcp`**: a claude.ai connector (`get_catalog`, `run_report`,
 `run_preset`, `find_values`, `get_schema`, `run_sql`) over
-`gs://mcps-507817-lifesaver-data/lifesaver.sqlite`. This is a different service from the repo's
+`gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite`. This is a different service from the repo's
 `cloud/` MCP server, which shares the name but runs in us-central1 and pulls live from lsscloud.com.
 
 The web report builder that used to live here is now the **Reports** tab of the website
@@ -51,7 +51,7 @@ mounting the "cost" field is the list price, so margins are only reported for mo
 ```
 pip install -r requirements.txt
 (cd .. && pip install dbfread && python3 -m sqlite_extract.extract /path/to/lsbackup.zip mason_reports/lifesaver.sqlite)
-#   or: gcloud storage cp gs://mcps-507817-lifesaver-data/lifesaver.sqlite .
+#   or: gcloud storage cp gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite .
 PYTHONPATH=.. MCP_TOKEN=dev uvicorn mcp_server.main:app --port 8766    # http://localhost:8766/mcp/dev
 ```
 

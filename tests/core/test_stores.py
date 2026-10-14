@@ -17,7 +17,7 @@ def test_repo_stores_file_is_valid():
 
 def test_cloud_store_defaults_need_only_id_name_tier(tmp_path):
     (s,) = load_stores(write(tmp_path, '[[store]]\nid = "downtown"\nname = "Downtown"\ntier = "cloud"\n'))
-    assert s.data == "gs://lifesaver-kpi-warehouse/stores/downtown/warehouse.db"
+    assert s.data == "gs://frame-shop-511616-kpi-warehouse/stores/downtown/warehouse.db"
     assert s.secret == "lifesaver-store-downtown"
     assert not s.on_prem
 

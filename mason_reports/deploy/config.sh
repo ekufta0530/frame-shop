@@ -1,5 +1,5 @@
 # Shared settings for the deploy scripts. Edit these before the first deploy.
-PROJECT="${PROJECT:-mcps-507817}"                   # Cameramall
+PROJECT="${PROJECT:-frame-shop-511616}"                   # frame-shop
 REGION="${REGION:-us-west1}"
 BUCKET="${BUCKET:-${PROJECT}-lifesaver-data}"      # private bucket holding lifesaver.sqlite
 RUNTIME_SA="lifesaver-reports@${PROJECT}.iam.gserviceaccount.com"

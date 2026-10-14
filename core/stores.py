@@ -27,7 +27,7 @@ ON_PREM = "on-prem"
 TIERS = (CLOUD, ON_PREM)
 
 DEFAULT_FILE = Path(__file__).resolve().parent.parent / "stores.toml"
-CLOUD_WAREHOUSE = "gs://lifesaver-kpi-warehouse/stores/{id}/warehouse.db"
+CLOUD_WAREHOUSE = "gs://frame-shop-511616-kpi-warehouse/stores/{id}/warehouse.db"
 CLOUD_SECRET = "lifesaver-store-{id}"
 
 # Reserved: the pooled all-stores view uses this id.

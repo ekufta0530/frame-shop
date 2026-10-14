@@ -7,8 +7,8 @@ SQL console). React + Vite frontend (`frontend/`), FastAPI backend (`server.py`)
 
 ```
 stores.toml ──▶ webapp.data.DataManager ──▶ webapp.views / insights ──▶ /api/* ──▶ React
-                  │  cloud:   gs://lifesaver-kpi-warehouse/stores/<id>/warehouse.db   (refresh.yml, daily)
-                  │  on-prem: gs://mcps-507817-lifesaver-data/lifesaver.sqlite        (mason-ingest.yml)
+                  │  cloud:   gs://frame-shop-511616-kpi-warehouse/stores/<id>/warehouse.db   (refresh.yml, daily)
+                  │  on-prem: gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite        (mason-ingest.yml)
                   └─ + pooled "all stores" warehouse   (core.aggregate, rebuilt only when a store's data changes)
 ```
 
@@ -37,9 +37,9 @@ dashboards and the comparison treat them identically.
 2. Put its lsscloud login in Secret Manager (name = `lifesaver-store-<id>`):
    ```bash
    echo -n '{"username": "...", "password": "..."}' | \
-     gcloud secrets create lifesaver-store-downtown --project=mcps-507817 --data-file=-
-   gcloud secrets add-iam-policy-binding lifesaver-store-downtown --project=mcps-507817 \
-     --member="serviceAccount:gha-deployer@mcps-507817.iam.gserviceaccount.com" \
+     gcloud secrets create lifesaver-store-downtown --project=frame-shop-511616 --data-file=-
+   gcloud secrets add-iam-policy-binding lifesaver-store-downtown --project=frame-shop-511616 \
+     --member="serviceAccount:gha-deployer@frame-shop-511616.iam.gserviceaccount.com" \
      --role=roles/secretmanager.secretAccessor
    ```
 3. Run the **refresh store data** workflow once by hand with `store = downtown` and **backfill** ticked
@@ -94,19 +94,18 @@ session cookie after that. There are no passwords and no password form. Everyone
 every store. For local sign-in testing set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (and
 `OAUTH_REDIRECT_URI` if not on localhost:8765) instead of `AUTH_DISABLED=1`.
 
-### Migrating the main store's data (once)
+### Setting up a project (or moving to a new one)
 
-The main store's warehouse moves from the bucket root into a per-store folder, and its login into a
-per-store secret. Both are copies; nothing is deleted:
+`cloud/scripts/bootstrap_project.sh` does the one-time GCP setup, safely re-runnable: APIs, service accounts,
+the data and warehouse buckets, the GitHub Actions deploy identity (Workload Identity Federation), and, when the
+old project is readable, a copy of the data and secrets (values go project to project, never printed):
 
 ```bash
-gcloud storage cp gs://lifesaver-kpi-warehouse/warehouse.db gs://lifesaver-kpi-warehouse/stores/main/warehouse.db
-gcloud storage cp -r gs://lifesaver-kpi-warehouse/warehouse_raw gs://lifesaver-kpi-warehouse/stores/main/
-printf '{"username": "%s", "password": "%s"}' \
-  "$(gcloud secrets versions access latest --secret=lifesaver-username)" \
-  "$(gcloud secrets versions access latest --secret=lifesaver-password)" | \
-  gcloud secrets create lifesaver-store-main --project=mcps-507817 --data-file=-
+PROJECT=frame-shop-511616 cloud/scripts/bootstrap_project.sh
 ```
+
+It ends by printing what's left: the OAuth client secrets, the GitHub repo variables, the deploys, and
+adding people to the allowlist.
 
 The old public static dashboard bucket (`lifesaver-kpi-dashboard-303f74`) is no longer written to
 **and still serves customer-derived figures publicly**. Close it now (the new site does not read it):

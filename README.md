@@ -29,7 +29,7 @@ lsscloud.com ── Work Order List report          owner drags LifeSaver folder
    │ refresh.yml (daily 09:17 UTC, one job         │
    │   per cloud store in stores.toml)             │ mason-ingest.yml (every 6 h)
    └─▶ cloud.warehouse.job sync                    └─▶ sqlite_extract/ingest.sh
-         gs://lifesaver-kpi-warehouse/                   gs://mcps-507817-lifesaver-data/
+         gs://frame-shop-511616-kpi-warehouse/                   gs://frame-shop-511616-lifesaver-data/
            stores/<id>/warehouse.db                        lifesaver.sqlite
                  │                                              │
                  └───────────────┬──────────────────────────────┘
@@ -51,12 +51,12 @@ via Workload Identity Federation (no keys):
 | [`refresh.yml`](.github/workflows/refresh.yml) | daily 09:17 UTC | every cloud store: pull new report rows → recompute KPIs → save its `warehouse.db` | DEPLOY.md §7 |
 | [`mason-ingest.yml`](.github/workflows/mason-ingest.yml) | every 6 h (:41) | on-prem store: newest Drive upload → validated `lifesaver.sqlite` | DEPLOY.md §8 |
 
-GCS buckets (project `mcps-507817`):
+GCS buckets (project `frame-shop-511616`):
 
 | Bucket | Holds | Written by |
 |---|---|---|
-| `lifesaver-kpi-warehouse` (private, versioned) | each cloud store's `stores/<id>/warehouse.db` + `warehouse_raw/` — the system of record | `refresh.yml` |
-| `mcps-507817-lifesaver-data` (private) | the on-prem store's live `lifesaver.sqlite`, `archive/` (replaced copies), `raw/<ts>/` (source `.dbf`s, deleted after 365 days), `ingest/state.json`; also `users.json`, the website's logins | `mason-ingest.yml`, `webapp/users.sh` |
+| `frame-shop-511616-kpi-warehouse` (private, versioned) | each cloud store's `stores/<id>/warehouse.db` + `warehouse_raw/` — the system of record | `refresh.yml` |
+| `frame-shop-511616-lifesaver-data` (private) | the on-prem store's live `lifesaver.sqlite`, `archive/` (replaced copies), `raw/<ts>/` (source `.dbf`s, deleted after 365 days), `ingest/state.json`; also `users.json`, the website's logins | `mason-ingest.yml`, `webapp/users.sh` |
 
 ## Layout
 
@@ -148,7 +148,7 @@ An on-prem store. In production this is hands-off: the owner uploads to Drive an
 `mason-ingest.yml` does the rest. By hand:
 
 ```bash
-# LifeSaver folder or zip -> lifesaver.sqlite (or: gcloud storage cp gs://mcps-507817-lifesaver-data/lifesaver.sqlite mason.sqlite)
+# LifeSaver folder or zip -> lifesaver.sqlite (or: gcloud storage cp gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite mason.sqlite)
 .venv/bin/python -m sqlite_extract.extract ~/Downloads/LifeSaver.zip mason.sqlite
 ```
 

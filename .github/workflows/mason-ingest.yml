@@ -22,7 +22,7 @@ on:
 concurrency: mason-ingest
 
 env:
-  DATA_BUCKET: mcps-507817-lifesaver-data
+  DATA_BUCKET: frame-shop-511616-lifesaver-data
 
 jobs:
   ingest:
@@ -48,7 +48,7 @@ jobs:
           access_token_scopes: https://www.googleapis.com/auth/drive.readonly
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: mcps-507817
+          project_id: frame-shop-511616
 
       - id: ingest
         name: Pull new upload from Drive -> lifesaver.sqlite

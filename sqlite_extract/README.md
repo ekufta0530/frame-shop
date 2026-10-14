@@ -4,7 +4,7 @@ The Mason store runs the LifeSaver **desktop** app (Visual FoxPro tables), not
 Lifesaver Cloud. Its history (June 2015 on) can't be scraped. Instead, the owner
 uploads a copy of their LifeSaver folder, and this package turns it into:
 
-- **`lifesaver.sqlite`** in `gs://mcps-507817-lifesaver-data/`: clean tables and
+- **`lifesaver.sqlite`** in `gs://frame-shop-511616-lifesaver-data/`: clean tables and
   views over the POS data. This is the live dataset for the website
   ([`webapp/`](../webapp/): the Mason dashboard, in-store detail and report builder)
   and Mason's SQL MCP server ([`mason_reports/`](../mason_reports/)). Both re-read it
@@ -79,7 +79,7 @@ zip gets picked up and rejected.
 **What happened last?**
 
 ```bash
-gcloud storage cat gs://mcps-507817-lifesaver-data/ingest/state.json
+gcloud storage cat gs://frame-shop-511616-lifesaver-data/ingest/state.json
 ```
 
 `metrics` has the work-order/customer counts, the data-through date, and the
@@ -93,7 +93,7 @@ publishes it despite the checks.
 **Roll back to an earlier dataset:**
 
 ```bash
-B=gs://mcps-507817-lifesaver-data
+B=gs://frame-shop-511616-lifesaver-data
 gcloud storage ls $B/archive/
 gcloud storage cp $B/archive/lifesaver-<ts>.sqlite $B/lifesaver.sqlite
 ```

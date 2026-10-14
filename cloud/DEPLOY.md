@@ -1,6 +1,6 @@
 # Deploying: MCP server, dashboard, and data refreshes
 
-Everything lives in GCP project `mcps-507817`. All automation runs as the
+Everything lives in GCP project `frame-shop-511616`. All automation runs as the
 `gha-deployer` service account through Workload Identity Federation (§6).
 
 | § | What | Runs |
@@ -10,6 +10,8 @@ Everything lives in GCP project `mcps-507817`. All automation runs as the
 | 7 | Main store's daily data refresh (`refresh.yml`) | daily |
 | 8 | Mason's data from Google Drive (`mason-ingest.yml`) | every 6 h |
 
+A new project is set up in one go by `cloud/scripts/bootstrap_project.sh` (it does the buckets, service accounts,
+IAM grants and WIF below, and copies data and secrets from the old project); the sections explain what it does.
 Each § lists the one-time IAM grants it needs on top of the earlier ones. The
 end-to-end picture and the bucket map are in the
 [top-level README](../README.md#how-it-fits-together).
@@ -188,7 +190,7 @@ The deploy jobs authenticate to GCP keylessly. Create a deploy service account
 and let this repo impersonate it:
 
 ```bash
-PROJECT=mcps-507817
+PROJECT=frame-shop-511616
 PROJNUM=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
 REPO=ekufta0530/lifesaver-mcp
 SA=gha-deployer@$PROJECT.iam.gserviceaccount.com
@@ -211,7 +213,7 @@ gcloud iam service-accounts add-iam-policy-binding \
 gcloud run services add-iam-policy-binding frame-shop --region=us-west1 \
   --member="serviceAccount:$SA" --role=roles/run.admin
 gcloud iam service-accounts add-iam-policy-binding \
-  frame-shop@mcps-507817.iam.gserviceaccount.com \
+  frame-shop@frame-shop-511616.iam.gserviceaccount.com \
   --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
 
 # WIF pool + provider, locked to this repo
@@ -238,7 +240,7 @@ Variables**:
 
 - `GCP_WIF_PROVIDER` — the provider resource name printed above
   (`projects/<num>/locations/global/workloadIdentityPools/github/providers/github`)
-- `GCP_DEPLOY_SA` — `gha-deployer@mcps-507817.iam.gserviceaccount.com`
+- `GCP_DEPLOY_SA` — `gha-deployer@frame-shop-511616.iam.gserviceaccount.com`
 
 ### Rollback
 
@@ -259,7 +261,7 @@ stores' timezones / off-hours). It builds a matrix from `stores.toml` (every
 in parallel: load its login from Secret Manager → pull its `warehouse.db` from
 GCS → `cloud.warehouse.job sync` (logs into lsscloud.com, pulls the trailing
 window, recomputes KPIs) → push `warehouse.db` + any new raw files back to
-`gs://lifesaver-kpi-warehouse/stores/<id>/`. Nothing is published: the website
+`gs://frame-shop-511616-kpi-warehouse/stores/<id>/`. Nothing is published: the website
 re-reads the warehouse from GCS within ten minutes. One store failing (bad
 password, lsscloud down) doesn't stop the others.
 
@@ -276,11 +278,11 @@ reuses the `gha-deployer` WIF identity from §6, which needs **write** access to
 the warehouse bucket and **read** access to each store secret:
 
 ```bash
-PROJECT=mcps-507817
+PROJECT=frame-shop-511616
 SA=gha-deployer@$PROJECT.iam.gserviceaccount.com
 
 # upgrade viewer -> objectAdmin so the workflow can write each store's warehouse back
-gcloud storage buckets add-iam-policy-binding gs://lifesaver-kpi-warehouse \
+gcloud storage buckets add-iam-policy-binding gs://frame-shop-511616-kpi-warehouse \
   --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
 
 # one secret per cloud store (see "Adding a cloud store" in webapp/README.md)
@@ -301,16 +303,16 @@ Drive folder shared with `gha-deployer`. Every 6 hours the workflow runs
 `sqlite_extract/ingest.sh`: newest upload → just the 9 needed `.dbf`/`.fpt`
 files → `lifesaver.sqlite` → refuse it if it has fewer work orders/customers or
 an older latest order date than the live one → publish to
-`gs://mcps-507817-lifesaver-data/lifesaver.sqlite` (previous copy to
+`gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite` (previous copy to
 `archive/`, source tables to `raw/<ts>/`). The website re-reads the file within ten minutes. Uploads
 changed in the last 30 min are left for the next run (still uploading). The
-outcome is in `gs://mcps-507817-lifesaver-data/ingest/state.json`; a rejected
+outcome is in `gs://frame-shop-511616-lifesaver-data/ingest/state.json`; a rejected
 upload fails the run once, then is skipped until a new upload arrives.
 
 One-time setup:
 
 ```bash
-PROJECT=mcps-507817
+PROJECT=frame-shop-511616
 SA=gha-deployer@$PROJECT.iam.gserviceaccount.com
 
 gcloud services enable drive.googleapis.com --project=$PROJECT
@@ -327,7 +329,7 @@ gcloud storage buckets update gs://$PROJECT-lifesaver-data --lifecycle-file=/tmp
 Then:
 
 1. Create a Drive folder (e.g. "LifeSaver uploads"), **share it with
-   `gha-deployer@mcps-507817.iam.gserviceaccount.com` as Viewer**, and share it
+   `gha-deployer@frame-shop-511616.iam.gserviceaccount.com` as Viewer**, and share it
    with the owner as Editor.
 2. Set the repo variable `MASON_DRIVE_FOLDER_ID` to the folder's ID (the last
    part of its URL): `gh variable set MASON_DRIVE_FOLDER_ID --body <id>`.

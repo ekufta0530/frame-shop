@@ -2,7 +2,7 @@
 #
 # Two tiers:
 #   cloud    -- runs on Lifesaver Cloud (lsscloud.com). refresh.yml pulls its Work
-#               Order List report daily into gs://lifesaver-kpi-warehouse/stores/<id>/.
+#               Order List report daily into gs://frame-shop-511616-kpi-warehouse/stores/<id>/.
 #   on-prem  -- runs LifeSaver on its own machine. The owner uploads the database
 #               files; the site reads the resulting lifesaver.sqlite and, on top of
 #               the cloud-style dashboard, shows the deeper on-prem sections.
@@ -11,13 +11,13 @@
 #   1. add a [[store]] block below with id, name and tier = "cloud"
 #   2. store its lsscloud login in Secret Manager as lifesaver-store-<id>:
 #        echo -n '{"username": "...", "password": "..."}' | \
-#          gcloud secrets create lifesaver-store-<id> --project=mcps-507817 --data-file=-
+#          gcloud secrets create lifesaver-store-<id> --project=frame-shop-511616 --data-file=-
 #      then run the "refresh store data" workflow once with backfill ticked
 #      (cloud/DEPLOY.md §9 has the details).
 #
 # Optional per-store keys (all have sensible defaults):
 #   data        -- where the store's data lives (gs:// or a local path). Defaults:
-#                  cloud    gs://lifesaver-kpi-warehouse/stores/<id>/warehouse.db
+#                  cloud    gs://frame-shop-511616-kpi-warehouse/stores/<id>/warehouse.db
 #                  on-prem  required -- the published lifesaver.sqlite
 #   secret      -- Secret Manager name of a cloud store's login (default lifesaver-store-<id>)
 #   chart_from  -- first month (YYYY-MM) on the monthly charts (default: first month of data)
@@ -52,7 +52,7 @@ notes = [
 id = "mason"
 name = "Mason"
 tier = "on-prem"
-data = "gs://mcps-507817-lifesaver-data/lifesaver.sqlite"
+data = "gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite"
 chart_from = "2015-06"
 plot_from = { cohort = "2017-06", trailing = "2016-05" }
 notes = [

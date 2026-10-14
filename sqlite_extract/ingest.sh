@@ -20,7 +20,7 @@ set -euo pipefail
 
 : "${DRIVE_FOLDER_ID:?set DRIVE_FOLDER_ID}"
 : "${DRIVE_TOKEN:?set DRIVE_TOKEN (drive.readonly access token)}"
-DATA_BUCKET="${DATA_BUCKET:-mcps-507817-lifesaver-data}"
+DATA_BUCKET="${DATA_BUCKET:-frame-shop-511616-lifesaver-data}"
 LIVE="gs://$DATA_BUCKET/lifesaver.sqlite"
 STATE="gs://$DATA_BUCKET/ingest/state.json"
 WORK="$(mktemp -d)"

@@ -100,7 +100,7 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: mcps-507817
+          project_id: frame-shop-511616
       - name: Deploy to Cloud Run
         run: |
           gcloud run services update lifesaver-mcp \
@@ -126,7 +126,7 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: mcps-507817
+          project_id: frame-shop-511616
       # webapp/deploy.sh creates the service on first run; after that this just rolls the image
       - name: Deploy to Cloud Run
         run: |
