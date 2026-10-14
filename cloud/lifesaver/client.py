@@ -17,6 +17,7 @@ import json
 import logging
 import re
 from datetime import date
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -36,7 +37,6 @@ _HIDDEN_FIELDS = (
 )
 
 _LOGIN_PATH = "/Account/Login"
-_TERMINATE_PATH = "/Account/TerminateSession/"
 _LOGOFF_PATH = "/Account/LogOff"
 _EXPORT_PATH = "/Reserved.ReportViewerWebControl.axd"
 
@@ -126,22 +126,23 @@ class LifesaverClient:
                 "(or run scripts/terminate_my_sessions.py)"
             )
 
-        user_id = model.get("UserId")
+        # The login page's "terminate" button re-submits the login form with the session's id
+        # (TerminateSessionId); the old /Account/TerminateSession/ endpoint is gone (404).
         for sess in mine:
-            self._terminate_session(sess["UniqueID"], user_id)
+            resp = self._post_login(terminate=sess["UniqueID"])
             log.warning(
                 "terminated a stale session for %s (created %s)",
                 self._s.lifesaver_username, sess.get("DateCreated"),
             )
-
-        resp = self._post_login()
-        if _LOGIN_PATH in resp.url:
-            raise AuthError(
-                "still blocked after terminating our own session(s) -- "
-                + str(self._error_summary(resp.text))
-            )
-        self._authenticated = True
-        log.info("authenticated to %s (after clearing a stale session)", self._s.lifesaver_base_url)
+            if self._logged_in(resp):
+                self._authenticated = True
+                log.info("authenticated to %s (after clearing a stale session)",
+                         self._s.lifesaver_base_url)
+                return
+        raise AuthError(
+            "still blocked after terminating our own session(s) -- "
+            + str(self._error_summary(resp.text))
+        )
 
     def logout(self) -> None:
         """Best-effort: release the server-side session so the next run isn't blocked."""
@@ -154,26 +155,31 @@ class LifesaverClient:
         finally:
             self._authenticated = False
 
-    def _post_login(self) -> requests.Response:
+    def _post_login(self, terminate: str | None = None) -> requests.Response:
+        data = {"UserName": self._s.lifesaver_username, "Password": self._s.lifesaver_password}
+        if terminate:
+            data["TerminateSessionId"] = terminate  # end this session of ours and log in instead
         resp = self._session.post(
-            self._url(_LOGIN_PATH),
-            data={
-                "UserName": self._s.lifesaver_username,
-                "Password": self._s.lifesaver_password,
-            },
-            timeout=self._s.lifesaver_http_timeout,
+            self._url(_LOGIN_PATH), data=data, timeout=self._s.lifesaver_http_timeout,
         )
         resp.raise_for_status()
         return resp
 
-    def _terminate_session(self, unique_id: str, user_id) -> None:
-        resp = self._session.post(
-            self._url(_TERMINATE_PATH),
-            data=json.dumps({"Session": unique_id, "UserId": user_id}),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=self._s.lifesaver_http_timeout,
-        )
-        resp.raise_for_status()
+    def _logged_in(self, resp: requests.Response) -> bool:
+        """A login POST worked if it redirected off the login page, or answered with the JSON the
+        login page's own script gets ({"success": true, "redirectUrl": ...})."""
+        if _LOGIN_PATH not in resp.url:
+            return True
+        try:
+            body = resp.json()
+        except ValueError:
+            return False
+        if not (isinstance(body, dict) and body.get("success")):
+            return False
+        if body.get("redirectUrl"):  # what the browser would load next
+            self._session.get(urljoin(self._s.lifesaver_base_url, body["redirectUrl"]),
+                              timeout=self._s.lifesaver_http_timeout)
+        return True
 
     @staticmethod
     def _parse_login_model(html: str) -> dict | None:

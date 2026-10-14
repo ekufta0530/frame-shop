@@ -68,6 +68,7 @@ import json
 import os
 import re
 import sys
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -140,10 +141,11 @@ def login(session: requests.Session, username: str, password: str) -> requests.R
                           "ActiveSessions":[{"UniqueID":"...","UserAccount":{...}}],
                           "UserId":14648, ...};
 
-    Clearing it = POST /Account/TerminateSession/ with JSON
-    {"Session": <UniqueID>, "UserId": <UserId>}. We only ever terminate a
-    session whose UserAccount.UserName is our own, then retry the login once.
-    Call logout() when done so this doesn't happen next time.
+    Clearing it = re-POST the login form with TerminateSessionId=<UniqueID>,
+    which is what the login page's terminate button does (the old
+    POST /Account/TerminateSession/ endpoint is gone). We only ever terminate a
+    session whose UserAccount.UserName is our own. Call logout() when done so
+    this doesn't happen next time.
     """
     resp = session.post(LOGIN_URL, data={"UserName": username, "Password": password})
     resp.raise_for_status()
@@ -165,18 +167,20 @@ def login(session: requests.Session, username: str, password: str) -> requests.R
         raise RuntimeError(f"Login rejected: {model.get('Errors')}")
 
     for s in mine:
-        t = session.post(
-            f"{BASE}/Account/TerminateSession/",
-            data=json.dumps({"Session": s["UniqueID"], "UserId": model.get("UserId")}),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-        )
-        t.raise_for_status()
-
-    resp = session.post(LOGIN_URL, data={"UserName": username, "Password": password})
-    resp.raise_for_status()
-    if "/Account/Login" in resp.url:
-        raise RuntimeError("Still blocked after terminating our own session(s).")
-    return resp
+        resp = session.post(LOGIN_URL, data={"UserName": username, "Password": password,
+                                             "TerminateSessionId": s["UniqueID"]})
+        resp.raise_for_status()
+        if "/Account/Login" not in resp.url:
+            return resp
+        try:
+            body = resp.json()
+        except ValueError:
+            continue
+        if isinstance(body, dict) and body.get("success"):
+            if body.get("redirectUrl"):
+                return session.get(urljoin(BASE, body["redirectUrl"]))
+            return resp
+    raise RuntimeError("Still blocked after terminating our own session(s).")
 
 
 def logout(session: requests.Session) -> None:

@@ -40,9 +40,8 @@ def main() -> int:
 
     model = json.loads(m.group(1))
     errors = model.get("Errors") or []
-    user_id = model["UserId"]
     sessions = model.get("ActiveSessions") or []
-    print(f"UserId={user_id} Errors={errors} ActiveSessions={len(sessions)}")
+    print(f"UserId={model.get('UserId')} Errors={errors} ActiveSessions={len(sessions)}")
 
     mine = [
         sess for sess in sessions
@@ -57,28 +56,24 @@ def main() -> int:
         print("No session of your own to terminate.")
         return 0
 
+    # The login page's terminate button re-submits the login form with the session's id; that ends
+    # the old session and logs this one in, so log it straight back out to leave nothing open.
+    ok = False
     for sess in mine:
-        unique = sess["UniqueID"]
-        created = sess.get("DateCreated")
-        resp = s.post(
-            f"{BASE}/Account/TerminateSession/",
-            data=json.dumps({"Session": unique, "UserId": user_id}),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-        )
-        print(f"terminate {unique} (created {created}) -> {resp.status_code} {resp.text[:120]}")
-
-    # verify on a throwaway session, then log it back out so we don't just
-    # replace the stale session with a new one
-    s2 = requests.Session()
-    r2 = s2.post(f"{BASE}/Account/Login", data={"UserName": USERNAME, "Password": PASSWORD})
-    ok = "/Account/Login" not in r2.url
-    print(f"\nre-login {'OK' if ok else 'STILL BLOCKED'} (final url: {r2.url})")
+        r = s.post(f"{BASE}/Account/Login", data={"UserName": USERNAME, "Password": PASSWORD,
+                                                  "TerminateSessionId": sess["UniqueID"]})
+        ok = "/Account/Login" not in r.url
+        with contextlib.suppress(ValueError):
+            ok = ok or bool(r.json().get("success"))
+        print(f"terminate {sess['UniqueID']} (created {sess.get('DateCreated')}) -> "
+              f"{'logged in' if ok else 'still blocked'}")
+        if ok:
+            break
     if ok:
         with contextlib.suppress(requests.RequestException):
-            s2.get(f"{BASE}/Account/LogOff", timeout=30)
-        print("logged the verification session back out")
+            s.get(f"{BASE}/Account/LogOff", timeout=30)
+        print("logged that session back out")
     return 0 if ok else 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

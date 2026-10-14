@@ -3,11 +3,9 @@ name: build & deploy
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
   SITE_IMAGE: ghcr.io/${{ github.repository }}-site
 
 jobs:
@@ -43,74 +41,29 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3   # docker-container driver: needed for gha cache export
 
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=long
-            type=ref,event=tag
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: cloud/Dockerfile
-          push: true
-          platforms: linux/amd64   # Cloud Run runs amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+      # the website, which is also the MCP server for Claude (webapp/mcp_server.py)
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: webapp/Dockerfile
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64   # Cloud Run runs amd64
           tags: |
             ${{ env.SITE_IMAGE }}:latest
             ${{ env.SITE_IMAGE }}:sha-${{ github.sha }}
           cache-from: type=gha,scope=site
           cache-to: type=gha,mode=max,scope=site
 
-  # ---- deploy: push to main -> update the live surfaces --------------------
-  # Both jobs authenticate to GCP with Workload Identity Federation (keyless);
-  # one-time setup + the GCP_WIF_PROVIDER / GCP_DEPLOY_SA repo variables are in
-  # DEPLOY.md.
-
-  deploy-mcp:
-    needs: build-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: frame-shop-511616
-      - name: Deploy to Cloud Run
-        run: |
-          gcloud run services update lifesaver-mcp \
-            --region=us-central1 \
-            --image=${{ env.IMAGE }}:sha-${{ github.sha }}
-      - name: Smoke-check /health
-        run: |
-          URL=$(gcloud run services describe lifesaver-mcp \
-            --region=us-central1 --format='value(status.url)')
-          curl -sf "$URL/health"
+  # ---- deploy: push to main -> roll the website onto the new image ----------
+  # Authenticates to GCP with Workload Identity Federation (keyless); one-time
+  # setup + the GCP_WIF_PROVIDER / GCP_DEPLOY_SA repo variables are in
+  # cloud/DEPLOY.md.
 
   deploy-site:
     needs: build-push

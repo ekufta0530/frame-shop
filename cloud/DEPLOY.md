@@ -177,10 +177,12 @@ Once connected, the `get_work_order_list_report` tool is available in chats.
 
 | Job | Trigger | Effect |
 |---|---|---|
-| `test` | always | `pytest -q` |
-| `build-push` | always | build + push image to GHCR (`latest`, `sha-<commit>`) |
-| `deploy-mcp` | push to `main` | `gcloud run services update lifesaver-mcp --image=…:latest`, then curls `/health` |
-| `deploy-site` | push to `main` | builds the website image (`…-site`), then `gcloud run services update frame-shop --image=…:latest` (us-west1), then curls `/health`. See [webapp/README.md](../webapp/README.md) |
+| `test` | always | `pytest -q`, plus the frontend's type-check, lint, tests and build |
+| `build-push` | always | build + push the website image to GHCR (`…-site:latest`, `…-site:sha-<commit>`) |
+| `deploy-site` | push to `main` | `gcloud run services update frame-shop --image=…-site:sha-<commit>` (us-west1), then curls `/health`. See [webapp/README.md](../webapp/README.md) |
+
+The website is also the MCP server for Claude (`webapp/mcp_server.py`), so this one deploy covers both.
+The old single-store MCP (`cloud/mcp_server`, sections 1-5 above) is no longer built or deployed by CI.
 
 The website reads its data straight from GCS, so a deploy is a **code** change only. The daily LifeSaver pull / KPI recompute is `.github/workflows/refresh.yml` (§7 below), and Mason's upload is `mason-ingest.yml` (§8) — both separate, scheduled workflows.
 
