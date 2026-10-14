@@ -7,6 +7,7 @@ Pages (client-side routes, all served index.html):
     /stores/<id>            one store's dashboard (+ the on-prem section for on-prem stores)
     /stores/<id>/reports    report builder + SQL console (on-prem stores)
     /login
+    /privacy                the public privacy policy (served by the API, not the SPA)
 
 Data comes from ``webapp.data.manager`` (see there); payloads are cached until any store's data
 changes. Env: STORES_FILE, STORE_<ID>_DATA, USERS_URI, SESSION_SECRET, AUTH_DISABLED=1 (local).
@@ -20,7 +21,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -31,6 +32,7 @@ from lsreports import presets, semantic
 from . import auth
 from .data import manager
 from .insights import insights
+from .privacy import PRIVACY_HTML
 from .views import ViewConfig, overview, store_view
 
 DIST = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -62,6 +64,11 @@ async def spec_error(_, exc):
 @app.get("/health")  # not /healthz: Cloud Run reserves paths ending in z
 def health():
     return {"ok": True}
+
+
+@app.get("/privacy", response_class=HTMLResponse)  # public: linked from the Google consent screen
+def privacy():
+    return PRIVACY_HTML
 
 
 # --- payload cache: one entry per (view, store), dropped when any data changes ----------

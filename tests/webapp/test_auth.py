@@ -110,3 +110,9 @@ def test_a_tampered_or_expired_session_cookie_is_ignored(client):
     assert auth.read_token(f"{payload}.{sig[::-1]}") is None
     assert auth.read_token(auth._sign({"u": "owner@gmail.com"}, -10)) is None
     assert auth.read_token(good)["username"] == "owner@gmail.com"
+
+
+def test_the_privacy_policy_is_public(client):
+    r = client.get("/privacy")  # no session
+    assert r.status_code == 200 and "Privacy Policy" in r.text
+    assert client.get("/api/stores").status_code == 401  # everything else still needs one

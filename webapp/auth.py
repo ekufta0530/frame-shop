@@ -48,7 +48,7 @@ AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 TOKEN_URL = 'https://oauth2.googleapis.com/token'
 ISSUERS = ('https://accounts.google.com', 'accounts.google.com')
 
-PUBLIC_PATHS = {'/login', '/api/login/google', '/auth/callback', '/api/logout', '/health', '/favicon.svg'}
+PUBLIC_PATHS = {'/login', '/api/login/google', '/auth/callback', '/api/logout', '/health', '/favicon.svg', '/privacy'}
 PUBLIC_PREFIXES = ('/assets/',)  # the built frontend's JS/CSS -- no data in it
 
 
