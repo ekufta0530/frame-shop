@@ -7,7 +7,7 @@ Pages (client-side routes, all served index.html):
     /stores/<id>            one store's dashboard (+ the on-prem section for on-prem stores)
     /stores/<id>/reports    report builder + SQL console (on-prem stores)
     /login
-    /privacy                the public privacy policy (served by the API, not the SPA)
+    /privacy, /terms        the public privacy policy and terms (served by the API, not the SPA)
 
 Data comes from ``webapp.data.manager`` (see there); payloads are cached until any store's data
 changes. Env: STORES_FILE, STORE_<ID>_DATA, USERS_URI, SESSION_SECRET, AUTH_DISABLED=1 (local).
@@ -32,7 +32,7 @@ from lsreports import presets, semantic
 from . import auth
 from .data import manager
 from .insights import insights
-from .privacy import PRIVACY_HTML
+from .legal import PRIVACY_HTML, TERMS_HTML
 from .views import ViewConfig, overview, store_view
 
 DIST = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -69,6 +69,11 @@ def health():
 @app.get("/privacy", response_class=HTMLResponse)  # public: linked from the Google consent screen
 def privacy():
     return PRIVACY_HTML
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms():
+    return TERMS_HTML
 
 
 # --- payload cache: one entry per (view, store), dropped when any data changes ----------

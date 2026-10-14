@@ -20,7 +20,7 @@ export default function Login() {
         <a className="btn primary block" href={`/api/login/google?next=${encodeURIComponent(next)}`}>
           Sign in with Google
         </a>
-        <p><a href="/privacy">Privacy policy</a></p>
+        <p><a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of service</a></p>
       </div>
     </div>
   );
