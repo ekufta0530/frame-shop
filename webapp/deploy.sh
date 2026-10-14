@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Create or update the website's Cloud Run service from the image publish.yml builds.
 # First run also creates the runtime service account and its read access to both buckets.
-# Access control is the app's own login (users.json in the data bucket), so the Cloud Run
-# service is public. Add people with webapp/users.sh before sharing the URL.
+# Access control is Google sign-in plus an email allowlist (users.json in the data bucket), so the Cloud Run
+# service is public. The OAuth client id/secret must already be in Secret Manager (see README), and people
+# are added with webapp/users.sh before sharing the URL.
 #   webapp/deploy.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -19,17 +20,20 @@ for b in "$DATA_BUCKET" "$WAREHOUSE_BUCKET"; do
     --member "serviceAccount:$RUNTIME_SA" --role roles/storage.objectViewer >/dev/null
 done
 
-# The session secret already exists from the old report site; create it only if missing.
+# The session secret is created here if missing.
 gcloud secrets describe "$SESSION_SECRET_NAME" --project "$PROJECT" >/dev/null 2>&1 || \
   python3 -c "import secrets; print(secrets.token_urlsafe(48), end='')" | \
     gcloud secrets create "$SESSION_SECRET_NAME" --project "$PROJECT" --data-file=- --replication-policy automatic
-retry gcloud secrets add-iam-policy-binding "$SESSION_SECRET_NAME" --project "$PROJECT" \
-  --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor >/dev/null
+for sec in "$SESSION_SECRET_NAME" "${OAUTH_SECRETS[@]}"; do
+  gcloud secrets describe "$sec" --project "$PROJECT" >/dev/null 2>&1 || { echo "missing secret: $sec" >&2; exit 1; }
+  retry gcloud secrets add-iam-policy-binding "$sec" --project "$PROJECT" \
+    --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor >/dev/null
+done
 
 gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE" \
   --service-account "$RUNTIME_SA" \
   --set-env-vars "USERS_URI=$USERS_URI" \
-  --set-secrets "SESSION_SECRET=${SESSION_SECRET_NAME}:latest" \
+  --set-secrets "SESSION_SECRET=${SESSION_SECRET_NAME}:latest,GOOGLE_CLIENT_ID=${OAUTH_SECRETS[0]}:latest,GOOGLE_CLIENT_SECRET=${OAUTH_SECRETS[1]}:latest" \
   --allow-unauthenticated \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 2 --quiet
 gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format 'value(status.url)'

@@ -75,16 +75,24 @@ CI does it: every push to `main` builds `ghcr.io/ekufta0530/lifesaver-mcp-site`,
 ```bash
 # 1. let the first CI run build the image, then make its package public (GitHub → Packages →
 #    lifesaver-mcp-site → Package settings), like the MCP image
-# 2. create the service, its service account and bucket access (reuses the existing logins file
-#    and session secret from the old report site):
+# 2. Google sign-in client: in the project's Console (APIs & Services -> Credentials) create an OAuth
+#    "Web application" client with redirect URIs
+#      http://localhost:8765/auth/callback
+#      https://frame-shop-<project-number>.us-west1.run.app/auth/callback
+#    (consent screen: External, scopes openid/email/profile, published), then store it:
+read -s "?client id: " V; printf '%s' "$V" | gcloud secrets create lifesaver-oauth-client-id --data-file=-
+read -s "?client secret: " V; printf '%s' "$V" | gcloud secrets create lifesaver-oauth-client-secret --data-file=-; unset V
+# 3. create the service, its service account and bucket/secret access (creates the session secret):
 webapp/deploy.sh
-# 3. logins -- the existing ones carry over; add or reset people with:
-webapp/users.sh add owner@outlook.com --name "Store Owner"
+# 4. who may sign in -- Google account emails; add or remove people with:
+webapp/users.sh add owner@gmail.com --name "Store Owner"
 ```
 
-The service is public at the Cloud Run level; the app's own login (`users.json`, scrypt hashes, signed
-session cookie) is the gate, and everyone who can sign in sees every store. Google sign-in will
-replace the password form: it only has to set the same cookie in `auth.py`.
+The service is public at the Cloud Run level; the gate is Google sign-in (`auth.py`: authorization-code
+flow with PKCE, state and nonce, verified email) plus the email allowlist in `users.json`, with a signed
+session cookie after that. There are no passwords and no password form. Everyone on the allowlist sees
+every store. For local sign-in testing set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (and
+`OAUTH_REDIRECT_URI` if not on localhost:8765) instead of `AUTH_DISABLED=1`.
 
 ### Migrating the main store's data (once)
 
@@ -126,7 +134,7 @@ CI runs both before it builds an image, and deploys the image tagged with the co
 | `data.py` | `DataManager`: per-store local copies (re-checked every 10 min, downloaded only when the GCS generation changes), on-prem warehouse derivation, the pooled warehouse; a broken store is reported and skipped |
 | `views.py` | warehouse → dashboard JSON, and the overview comparison. Store-agnostic |
 | `insights.py` | the on-prem "in-store detail" reports (specs run through `lsreports.semantic`) |
-| `auth.py`, `users.py`, `manage_users.py`, `users.sh` | login, accounts |
+| `auth.py`, `users.py`, `manage_users.py`, `users.sh` | Google sign-in, the email allowlist |
 | `frontend/` | React + TypeScript + Recharts. `src/charts.tsx` holds every chart; `src/styles.css` the design tokens |
 | `../lsreports/` | the report builder's query layer, shared with `mason_reports/` (the claude.ai SQL connector) |
 | `../core/stores.py`, `../core/aggregate.py` | the store registry and the pooled warehouse |
