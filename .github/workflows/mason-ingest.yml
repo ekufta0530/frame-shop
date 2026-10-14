@@ -2,8 +2,8 @@ name: mason data from drive
 
 # Every 6 hours: if the Mason owner has dropped a new LifeSaver upload (zip or
 # folder) into the shared Drive folder, rebuild lifesaver.sqlite from it, check
-# it isn't older/smaller than the live one, publish it, and re-render the
-# dashboard. A run with nothing new takes a few Drive API calls and exits.
+# it isn't older/smaller than the live one, and publish it. The website
+# picks the new file up within ten minutes. A run with nothing new takes a few Drive API calls and exits.
 #
 # Same WIF identity as publish.yml (gha-deployer). One-time setup -- Drive API,
 # bucket write access, sharing the folder, the MASON_DRIVE_FOLDER_ID repo
@@ -23,8 +23,6 @@ concurrency: mason-ingest
 
 env:
   DATA_BUCKET: mcps-507817-lifesaver-data
-  SITE_BUCKET: lifesaver-kpi-dashboard-303f74
-  WAREHOUSE_BUCKET: lifesaver-kpi-warehouse
 
 jobs:
   ingest:
@@ -59,9 +57,3 @@ jobs:
           DRIVE_TOKEN: ${{ steps.auth.outputs.access_token }}
           FORCE: ${{ inputs.force || false }}
         run: bash sqlite_extract/ingest.sh
-
-      - name: Rebuild + publish dashboard
-        if: steps.ingest.outputs.published == 'true'
-        run: |
-          gcloud storage cp "gs://$WAREHOUSE_BUCKET/warehouse.db" warehouse.db
-          bash dashboard/publish.sh

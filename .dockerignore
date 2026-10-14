@@ -15,11 +15,11 @@ tests
 warehouse_raw
 cloud/scripts
 cloud/report_manifest.json
-core
-sqlite_extract
-dashboard
 mason.*
 *.md
 .mcp.json
 .python-version
 mason_reports
+node_modules
+**/node_modules
+webapp/frontend/dist

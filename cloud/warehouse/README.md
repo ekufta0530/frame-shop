@@ -2,7 +2,7 @@
 
 Accumulates the Work Order List history (pulled from lsscloud.com) into a local
 SQLite warehouse and computes the five retention KPIs. Design and rationale:
-[`../../dashboard/DESIGN.md`](../../dashboard/DESIGN.md).
+[`../../docs/kpi-design.md`](../../docs/kpi-design.md).
 
 The raw, line-item and identity layers live here; the visit/KPI layers and the
 math behind them are shared with every store and live in [`../../core/`](../../core/).

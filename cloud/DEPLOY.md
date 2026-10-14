@@ -178,12 +178,9 @@ Once connected, the `get_work_order_list_report` tool is available in chats.
 | `test` | always | `pytest -q` |
 | `build-push` | always | build + push image to GHCR (`latest`, `sha-<commit>`) |
 | `deploy-mcp` | push to `main` | `gcloud run services update lifesaver-mcp --image=…:latest`, then curls `/health` |
-| `deploy-dashboard` | push to `main` | pull `warehouse.db` from GCS → `dashboard/build.py` → upload `index.html` + `data.json` to the site bucket (`dashboard/publish.sh`) |
+| `deploy-site` | push to `main` | builds the website image (`…-site`), then `gcloud run services update frame-shop --image=…:latest` (us-west1), then curls `/health`. See [webapp/README.md](../webapp/README.md) |
 
-`deploy-dashboard` is a **code** refresh only — it re-renders the page from
-whatever data is already in `warehouse.db`. The daily LifeSaver pull / KPI
-recompute is `.github/workflows/refresh.yml` (§7 below) — a separate, scheduled
-workflow, not part of this push-triggered one.
+The website reads its data straight from GCS, so a deploy is a **code** change only. The daily LifeSaver pull / KPI recompute is `.github/workflows/refresh.yml` (§7 below), and Mason's upload is `mason-ingest.yml` (§8) — both separate, scheduled workflows.
 
 ### One-time setup: Workload Identity Federation
 
@@ -210,11 +207,12 @@ gcloud iam service-accounts add-iam-policy-binding \
   ${PROJNUM}-compute@developer.gserviceaccount.com \
   --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
 
-# Dashboard: read the warehouse bucket, write the site bucket
-gcloud storage buckets add-iam-policy-binding gs://lifesaver-kpi-warehouse \
-  --member="serviceAccount:$SA" --role=roles/storage.objectViewer
-gcloud storage buckets add-iam-policy-binding gs://lifesaver-kpi-dashboard-303f74 \
-  --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
+# Website: roll the frame-shop Cloud Run service (us-west1) onto a new image
+gcloud run services add-iam-policy-binding frame-shop --region=us-west1 \
+  --member="serviceAccount:$SA" --role=roles/run.admin
+gcloud iam service-accounts add-iam-policy-binding \
+  frame-shop@mcps-507817.iam.gserviceaccount.com \
+  --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
 
 # WIF pool + provider, locked to this repo
 gcloud iam workload-identity-pools create github --location=global \
@@ -253,50 +251,46 @@ gcloud run services update lifesaver-mcp --region=us-central1 \
 
 ---
 
-## 7. Daily dashboard refresh (`.github/workflows/refresh.yml`)
+## 7. Daily store refresh (`.github/workflows/refresh.yml`)
 
 Runs on a schedule (09:17 UTC — adjust the cron to taste once you know the
-store's timezone / off-hours): pull `warehouse.db` from GCS → `cloud.warehouse.job
-sync` (logs into lsscloud.com, pulls the trailing window, recomputes KPIs) →
-`dashboard/publish.sh` (rebuild `index.html` + `data.json`, upload to the site
-bucket) → push `warehouse.db` + any new raw files back to GCS.
+stores' timezones / off-hours). It builds a matrix from `stores.toml` (every
+**cloud** store, `python -m core.stores --tier cloud --matrix`) and, per store,
+in parallel: load its login from Secret Manager → pull its `warehouse.db` from
+GCS → `cloud.warehouse.job sync` (logs into lsscloud.com, pulls the trailing
+window, recomputes KPIs) → push `warehouse.db` + any new raw files back to
+`gs://lifesaver-kpi-warehouse/stores/<id>/`. Nothing is published: the website
+re-reads the warehouse from GCS within ten minutes. One store failing (bad
+password, lsscloud down) doesn't stop the others.
+
+Run it by hand from Actions → **refresh store data**: `store` limits it to one
+store id, `backfill` pulls that store's full history first (for a new store).
 
 Only the **current month and quarter** move — every closed period is frozen by
 `kpi_monthly.is_final` in the warehouse itself, so this can never rewrite a
 report that already closed.
 
-It reuses the `gha-deployer` WIF identity from §6, which needs two grants beyond
-what deploy already set up — **write** access to the warehouse bucket (deploy
-only has read) and **read** access to the two Lifesaver secrets:
+Each store's login is the Secret Manager secret named in `stores.toml` (default
+`lifesaver-store-<id>`), holding `{"username": "...", "password": "..."}`. It
+reuses the `gha-deployer` WIF identity from §6, which needs **write** access to
+the warehouse bucket and **read** access to each store secret:
 
 ```bash
 PROJECT=mcps-507817
 SA=gha-deployer@$PROJECT.iam.gserviceaccount.com
 
-# upgrade viewer -> objectAdmin so the workflow can write warehouse.db back
+# upgrade viewer -> objectAdmin so the workflow can write each store's warehouse back
 gcloud storage buckets add-iam-policy-binding gs://lifesaver-kpi-warehouse \
   --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
 
-# read the same two secrets the Cloud Run service uses
-for s in lifesaver-username lifesaver-password; do
-  gcloud secrets add-iam-policy-binding $s \
-    --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor
-done
+# one secret per cloud store (see "Adding a cloud store" in webapp/README.md)
+gcloud secrets add-iam-policy-binding lifesaver-store-main \
+  --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor
 ```
 
-No new API, service account, or container image — it's a second GitHub Actions
-workflow on the same runners, using the same WIF auth as `deploy-dashboard`.
-(An earlier design sketch used a Cloud Run Job + Cloud Scheduler instead; once
-CI/CD existed this was simpler and needed no new GCP surface.)
-
-**Session collision:** this workflow and the deployed MCP server both log into
-the single shared LifeSaver session. The MCP server auto-clears its own stale
-session and retries once (`lifesaver/client.py`), so a collision self-heals, but
-a claude.ai call during the refresh window could see one extra retry / a few
-seconds of latency. Scheduling the cron for the store's quietest hour avoids it
-in practice.
-
-Trigger manually any time: **Actions → refresh dashboard data → Run workflow**.
+**One-time migration of the main store** (copies; nothing is deleted) is in
+[webapp/README.md](../webapp/README.md#migrating-the-main-stores-data-once).
+Adding another cloud store afterwards is a `stores.toml` entry plus its secret.
 
 ---
 
@@ -308,7 +302,7 @@ Drive folder shared with `gha-deployer`. Every 6 hours the workflow runs
 files → `lifesaver.sqlite` → refuse it if it has fewer work orders/customers or
 an older latest order date than the live one → publish to
 `gs://mcps-507817-lifesaver-data/lifesaver.sqlite` (previous copy to
-`archive/`, source tables to `raw/<ts>/`) → `dashboard/publish.sh`. Uploads
+`archive/`, source tables to `raw/<ts>/`). The website re-reads the file within ten minutes. Uploads
 changed in the last 30 min are left for the next run (still uploading). The
 outcome is in `gs://mcps-507817-lifesaver-data/ingest/state.json`; a rejected
 upload fails the run once, then is skipped until a new upload arrives.

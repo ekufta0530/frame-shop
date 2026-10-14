@@ -1,35 +1,69 @@
-name: refresh dashboard data
+name: refresh store data
 
-# Daily: pull fresh Lifesaver data, recompute KPIs, rebuild + publish the
-# dashboard. This is the "live" half of the dashboard -- the current month and
-# quarter move with each run; every closed period is frozen by the warehouse
-# itself (kpi_monthly.is_final) and cannot change here.
+# Daily: for every cloud store in stores.toml, pull fresh Lifesaver data and recompute its KPIs.
+# The website reads each store's warehouse straight from GCS and picks up the new copy within
+# ten minutes, so there is nothing to build or publish here. Closed months are frozen by the
+# warehouse itself (kpi_monthly.is_final) and cannot change.
 #
-# Reuses the same WIF identity as publish.yml (gha-deployer) -- see DEPLOY.md
-# §7 for the one-time IAM grants this workflow needs beyond what deploy already
-# has (write access to the warehouse bucket, read access to the Lifesaver
-# secrets).
+# Each cloud store has its own lsscloud account (so its own one-session limit): its login is the
+# Secret Manager secret named in stores.toml (default lifesaver-store-<id>), holding
+# {"username": "...", "password": "..."}. Adding a store is a stores.toml entry + that secret;
+# tick "backfill" for its first run. See cloud/DEPLOY.md §7 and §9.
 #
-# Holds the single shared LifeSaver session for its duration (client.logout()
-# releases it when cloud.warehouse.job sync finishes) -- overlapping with a live MCP
-# call is possible but low-risk: the MCP server auto-clears its own stale
-# session and retries once (see lifesaver/client.py).
+# Same WIF identity as publish.yml (gha-deployer). Beyond what deploy already has, it needs
+# objectAdmin on the warehouse bucket and secretAccessor on each store secret (DEPLOY.md §7).
 
 on:
   schedule:
     - cron: "17 9 * * *"   # 09:17 UTC daily -- off-the-hour to dodge GHA's cron pile-up
   workflow_dispatch:
+    inputs:
+      store:
+        description: "Only this store id (default: every cloud store)"
+        required: false
+        default: ""
+      backfill:
+        description: "Pull the store's full history first (new stores, or to repair a gap)"
+        type: boolean
+        default: false
 
 env:
-  SITE_BUCKET: lifesaver-kpi-dashboard-303f74
-  WAREHOUSE_BUCKET: lifesaver-kpi-warehouse
+  PROJECT: mcps-507817
 
 jobs:
-  refresh:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - id: m
+        run: |
+          python -m core.stores --tier cloud --matrix > matrix.json
+          if [ -n "${{ inputs.store }}" ]; then
+            python - <<'EOF'
+          import json
+          m = json.load(open("matrix.json"))
+          m["include"] = [s for s in m["include"] if s["id"] == "${{ inputs.store }}"]
+          assert m["include"], "no cloud store with that id in stores.toml"
+          json.dump(m, open("matrix.json", "w"))
+          EOF
+          fi
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
+  sync:
+    needs: plan
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false   # one store's bad login must not stop the others
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    concurrency: refresh-${{ matrix.id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,33 +77,47 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: mcps-507817
+          project_id: ${{ env.PROJECT }}
 
-      - id: secrets
-        uses: google-github-actions/get-secretmanager-secrets@v2
-        with:
-          secrets: |-
-            LIFESAVER_USERNAME:mcps-507817/lifesaver-username
-            LIFESAVER_PASSWORD:mcps-507817/lifesaver-password
-
-      - name: Pull warehouse from GCS
+      - name: Load ${{ matrix.name }}'s login
         run: |
-          gcloud storage cp "gs://$WAREHOUSE_BUCKET/warehouse.db" warehouse.db
-          mkdir -p warehouse_raw
-          gcloud storage rsync -r "gs://$WAREHOUSE_BUCKET/warehouse_raw" warehouse_raw
+          secret=$(gcloud secrets versions access latest --secret="${{ matrix.secret }}")
+          user=$(jq -r .username <<<"$secret"); pass=$(jq -r .password <<<"$secret")
+          [ -n "$user" ] && [ "$user" != null ] && [ -n "$pass" ] && [ "$pass" != null ] \
+            || { echo "::error::secret ${{ matrix.secret }} must be JSON with username and password"; exit 1; }
+          echo "::add-mask::$user"; echo "::add-mask::$pass"
+          {
+            echo "LIFESAVER_USERNAME=$user"
+            echo "LIFESAVER_PASSWORD=$pass"
+            echo "WAREHOUSE_DB_PATH=$PWD/warehouse.db"
+            echo "WAREHOUSE_RAW_DIR=$PWD/warehouse_raw"
+          } >> "$GITHUB_ENV"
 
-      - name: Pull fresh Lifesaver data + recompute KPIs
-        env:
-          LIFESAVER_USERNAME: ${{ steps.secrets.outputs.LIFESAVER_USERNAME }}
-          LIFESAVER_PASSWORD: ${{ steps.secrets.outputs.LIFESAVER_PASSWORD }}
+      - name: Pull ${{ matrix.name }}'s warehouse from GCS
+        run: |
+          raw="$(dirname '${{ matrix.data }}')/warehouse_raw"
+          mkdir -p warehouse_raw
+          if ! gcloud storage cp '${{ matrix.data }}' warehouse.db; then
+            # Starting empty and syncing only the trailing window would overwrite a store's real
+            # history with a fragment, so a first run must be an explicit backfill.
+            if [ "${{ inputs.backfill }}" != "true" ]; then
+              echo "::error::no warehouse at ${{ matrix.data }}. New store? Run this workflow with backfill ticked. Migrating the main store? Copy its data first (webapp/README.md)."
+              exit 1
+            fi
+            echo "no warehouse yet at ${{ matrix.data }} -- starting empty (backfill)"
+          fi
+          gcloud storage rsync -r "$raw" warehouse_raw 2>/dev/null || true
+
+      - name: Backfill full history
+        if: inputs.backfill
+        run: python -m cloud.warehouse.job backfill
+
+      - name: Pull fresh data + recompute KPIs
         run: |
           python -m cloud.warehouse.job sync
           python -m cloud.warehouse.job status
 
-      - name: Rebuild + publish dashboard
-        run: bash dashboard/publish.sh
-
-      - name: Push warehouse back to GCS
+      - name: Push the warehouse back to GCS
         run: |
-          gcloud storage cp warehouse.db "gs://$WAREHOUSE_BUCKET/warehouse.db"
-          gcloud storage rsync -r warehouse_raw "gs://$WAREHOUSE_BUCKET/warehouse_raw"
+          gcloud storage cp warehouse.db '${{ matrix.data }}'
+          gcloud storage rsync -r warehouse_raw "$(dirname '${{ matrix.data }}')/warehouse_raw"

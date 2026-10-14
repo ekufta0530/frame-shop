@@ -17,7 +17,7 @@ Three-phase build:
    limit and the fact that the KPIs need full per-customer history) and serve
    five retention KPIs plus a business-revenue view. Backend built in
    `warehouse/` (SQLite; see `warehouse/README.md`). Design, KPI definitions, and
-   open questions: `dashboard/DESIGN.md`.
+   open questions: `docs/kpi-design.md`.
 
 Phase 1 must work standalone and be testable on its own before Phase 2 wraps it.
 Approval to programmatically access this report has already been obtained from

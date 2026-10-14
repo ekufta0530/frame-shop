@@ -18,13 +18,12 @@ warehouse_raw/
 *.db-wal
 *.db-shm
 
-# generated dashboard
-dashboard/index.html
-dashboard/data.json
-dashboard/mason.html
-
-# Mason store's LifeSaver extract (customer data), pulled by publish.sh
+# derived/downloaded store data (customer data) and the site's login file
 mason.sqlite
+mason.db
+users.json
+webapp/frontend/node_modules/
+webapp/frontend/dist/
 .DS_Store
 
 # raw LifeSaver desktop data from the owner (customer data) -- never committed

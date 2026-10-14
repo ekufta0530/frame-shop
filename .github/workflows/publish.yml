@@ -8,6 +8,7 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
+  SITE_IMAGE: ghcr.io/${{ github.repository }}-site
 
 jobs:
   test:
@@ -19,6 +20,17 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/frontend/package-lock.json
+      - name: Website frontend - type-check, lint, test, build
+        working-directory: webapp/frontend
+        run: |
+          npm ci
+          npm run check
+          npm run build
 
   build-push:
     needs: test
@@ -57,6 +69,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: webapp/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.SITE_IMAGE }}:latest
+            ${{ env.SITE_IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,mode=max,scope=site
+
   # ---- deploy: push to main -> update the live surfaces --------------------
   # Both jobs authenticate to GCP with Workload Identity Federation (keyless);
   # one-time setup + the GCP_WIF_PROVIDER / GCP_DEPLOY_SA repo variables are in
@@ -81,29 +105,21 @@ jobs:
         run: |
           gcloud run services update lifesaver-mcp \
             --region=us-central1 \
-            --image=${{ env.IMAGE }}:latest
+            --image=${{ env.IMAGE }}:sha-${{ github.sha }}
       - name: Smoke-check /health
         run: |
           URL=$(gcloud run services describe lifesaver-mcp \
             --region=us-central1 --format='value(status.url)')
           curl -sf "$URL/health"
 
-  deploy-dashboard:
-    needs: test
+  deploy-site:
+    needs: build-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    env:
-      SITE_BUCKET: lifesaver-kpi-dashboard-303f74
-      WAREHOUSE_BUCKET: lifesaver-kpi-warehouse
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install -r requirements.txt
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -111,7 +127,14 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: mcps-507817
-      - name: Rebuild + publish dashboard
+      # webapp/deploy.sh creates the service on first run; after that this just rolls the image
+      - name: Deploy to Cloud Run
         run: |
-          gcloud storage cp "gs://$WAREHOUSE_BUCKET/warehouse.db" warehouse.db
-          bash dashboard/publish.sh
+          gcloud run services update frame-shop \
+            --region=us-west1 \
+            --image=${{ env.SITE_IMAGE }}:sha-${{ github.sha }}
+      - name: Smoke-check /health
+        run: |
+          URL=$(gcloud run services describe frame-shop \
+            --region=us-west1 --format='value(status.url)')
+          curl -sf "$URL/health"

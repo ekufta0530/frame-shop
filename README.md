@@ -1,73 +1,62 @@
 # lifesaver-mcp
 
 Sales and customer-retention tooling for picture-framing stores on Lifesaver
-Software. Two data sources feed one shared KPI core and one dashboard:
+Software: one website for every store, fed by two kinds of data source.
 
-| Dir | What | Store |
-|---|---|---|
-| [`cloud/`](cloud/) | Everything that talks to Lifesaver Cloud (`lsscloud.com`): the report scraper (`lifesaver/`), the remote MCP server (`mcp_server/`, deployed to Cloud Run), the warehouse ingest that accumulates report pulls (`warehouse/`), and one-off pull scripts | Main store |
-| [`sqlite_extract/`](sqlite_extract/) | Turns the store's own LifeSaver desktop data (uploaded to Google Drive by the owner) into `lifesaver.sqlite`, then into KPI tables -- no scraping | Mason |
-| [`core/`](core/) | Store-independent: visits, the five retention KPIs, and the SQLite tables both sources write | both |
-| [`dashboard/`](dashboard/) | Renders one HTML page per store from `core` tables and publishes to GCS | both |
-| `tests/` | Offline suite, split as `tests/{cloud,core,sqlite_extract,dashboard}` | |
+| Dir | What |
+|---|---|
+| [`webapp/`](webapp/) | **The website** (React + FastAPI, Cloud Run): all-stores overview, a dashboard per store, and for on-prem stores an in-store detail section and a report builder / SQL console. [README](webapp/README.md) |
+| [`stores.toml`](stores.toml) | Every store: id, name, tier (`cloud` / `on-prem`), and where its data lives. Adding a cloud store is an entry here + a secret |
+| [`cloud/`](cloud/) | **Cloud tier.** Everything that talks to Lifesaver Cloud (`lsscloud.com`): the report scraper (`lifesaver/`), the remote MCP server (`mcp_server/`, Cloud Run), the warehouse ingest that accumulates report pulls (`warehouse/`), one-off pull scripts |
+| [`sqlite_extract/`](sqlite_extract/) | **On-prem tier.** Turns a store's own LifeSaver data (uploaded to Google Drive by the owner) into `lifesaver.sqlite`, then into KPI tables -- no scraping |
+| [`core/`](core/) | Store-independent: visits, the five retention KPIs, the SQLite tables every store writes, the store registry (`stores.py`) and the pooled all-stores warehouse (`aggregate.py`) |
+| [`lsreports/`](lsreports/) | The report builder's query layer over an on-prem store's `lifesaver.sqlite`; shared by the website and `mason_reports/` |
+| [`mason_reports/`](mason_reports/) | The claude.ai SQL connector for an on-prem store (the web report builder it used to hold is now part of the website) |
+| `tests/` | Offline suite, split as `tests/{cloud,core,sqlite_extract,webapp}` |
 
 Dependencies only point inward: `cloud` and `sqlite_extract` import `core`;
 `core` imports neither. Background: [cloud/spec.md](cloud/spec.md) (phases 1-2)
-and [dashboard/DESIGN.md](dashboard/DESIGN.md) (phase 3).
+and [docs/kpi-design.md](docs/kpi-design.md) (the KPI design; its renderer has
+since moved into `webapp/`).
 
 ## How it fits together
 
 ```
-MAIN STORE (Lifesaver Cloud)                    MASON (LifeSaver desktop)
+CLOUD STORES (one lsscloud account each)        ON-PREM STORES (LifeSaver on their own machine)
 
 lsscloud.com ── Work Order List report          owner drags LifeSaver folder / zip
-   │    │                                          into a shared Google Drive folder
-   │    │ refresh.yml (daily 09:17 UTC)               │
-   │    └─▶ cloud.warehouse.job sync                  │ mason-ingest.yml (every 6 h)
-   │          gs://lifesaver-kpi-warehouse/           └─▶ sqlite_extract/ingest.sh
-   │            warehouse.db, warehouse_raw/                gs://mcps-507817-lifesaver-data/
-   │                 │                                        lifesaver.sqlite
-   │                 │                                           │      │
-   │                 ▼                                           │      ▼
-   │     dashboard/publish.sh ◀── sqlite_extract.importer ◀──────┘   mason_reports/:
-   │       gs://lifesaver-kpi-dashboard-303f74/                      SQL MCP server +
-   │         index.html (main)   mason.html (Mason tab)              web report builder
-   ▼                                                                  (see below)
-cloud.mcp_server (Cloud Run "lifesaver-mcp")
-  live, per-call report pulls for claude.ai
+   │                                               into a shared Google Drive folder
+   │ refresh.yml (daily 09:17 UTC, one job         │
+   │   per cloud store in stores.toml)             │ mason-ingest.yml (every 6 h)
+   └─▶ cloud.warehouse.job sync                    └─▶ sqlite_extract/ingest.sh
+         gs://lifesaver-kpi-warehouse/                   gs://mcps-507817-lifesaver-data/
+           stores/<id>/warehouse.db                        lifesaver.sqlite
+                 │                                              │
+                 └───────────────┬──────────────────────────────┘
+                                 ▼   (re-read every 10 min; on-prem KPIs derived on arrival)
+                       webapp (Cloud Run "frame-shop")
+                         /              all stores: side by side + pooled
+                         /stores/<id>   one store (+ in-store detail and Reports if on-prem)
+
+cloud.mcp_server (Cloud Run "lifesaver-mcp", us-central1)   live per-call report pulls for claude.ai
+mason_reports/mcp_server (Cloud Run "lifesaver-mcp", us-west1)   SQL connector for claude.ai
 ```
 
-Three GitHub Actions workflows drive everything; all authenticate to GCP as
-`gha-deployer` via Workload Identity Federation (no keys):
+GitHub Actions drive everything; all authenticate to GCP as `gha-deployer`
+via Workload Identity Federation (no keys):
 
 | Workflow | When | Does | Setup |
 |---|---|---|---|
-| [`publish.yml`](.github/workflows/publish.yml) | push to `main` | test → image to GHCR → redeploy the cloud MCP server → re-render + publish both dashboard pages | [DEPLOY.md](cloud/DEPLOY.md) §1–6 |
-| [`refresh.yml`](.github/workflows/refresh.yml) | daily 09:17 UTC | main store: pull new report rows → recompute KPIs → publish dashboard → save `warehouse.db` back | DEPLOY.md §7 |
-| [`mason-ingest.yml`](.github/workflows/mason-ingest.yml) | every 6 h (:41) | Mason: newest Drive upload → validated `lifesaver.sqlite` → publish dashboard (only if a new upload was published) | DEPLOY.md §8 |
+| [`publish.yml`](.github/workflows/publish.yml) | push to `main` | test (incl. frontend build) → images to GHCR → redeploy the cloud MCP server and the website | [DEPLOY.md](cloud/DEPLOY.md) §1–6, [webapp/README.md](webapp/README.md) |
+| [`refresh.yml`](.github/workflows/refresh.yml) | daily 09:17 UTC | every cloud store: pull new report rows → recompute KPIs → save its `warehouse.db` | DEPLOY.md §7 |
+| [`mason-ingest.yml`](.github/workflows/mason-ingest.yml) | every 6 h (:41) | on-prem store: newest Drive upload → validated `lifesaver.sqlite` | DEPLOY.md §8 |
 
 GCS buckets (project `mcps-507817`):
 
 | Bucket | Holds | Written by |
 |---|---|---|
-| `lifesaver-kpi-warehouse` (private, versioned) | main store's `warehouse.db` + `warehouse_raw/` — the system of record | `refresh.yml` |
-| `mcps-507817-lifesaver-data` (private) | Mason's live `lifesaver.sqlite`, `archive/` (replaced copies), `raw/<ts>/` (source `.dbf`s, deleted after 365 days), `ingest/state.json` (last ingest outcome); also `users.json`, the report builder's logins | `mason-ingest.yml` |
-| `lifesaver-kpi-dashboard-303f74` (public read) | `index.html`, `data.json`, `mason.html` — [live dashboard](https://storage.googleapis.com/lifesaver-kpi-dashboard-303f74/index.html) | `publish.sh` (all three workflows) |
-
-**Mason's report builder + SQL MCP server** ([`mason_reports/`](mason_reports/)):
-a self-contained app (its own Dockerfile, requirements and deploy scripts) with
-two Cloud Run services built from one image, both in **us-west1**:
-
-- `lifesaver-reports`: a password-protected web report builder for the store.
-- `lifesaver-mcp`: a claude.ai connector with tools `get_catalog`,
-  `run_report`, `run_preset`, `find_values`, `get_schema` and `run_sql`. Not to be
-  confused with this repo's other `lifesaver-mcp`, in us-central1.
-
-Both read `gs://mcps-507817-lifesaver-data/lifesaver.sqlite` and re-check it
-every 10 minutes, so each Mason ingest refreshes them with no redeploy. They are
-deployed by hand (`mason_reports/deploy/*.sh`), not by CI. Its tables and
-views come from the one shared converter, `sqlite_extract/extract.py`. See
-[its README](mason_reports/README.md).
+| `lifesaver-kpi-warehouse` (private, versioned) | each cloud store's `stores/<id>/warehouse.db` + `warehouse_raw/` — the system of record | `refresh.yml` |
+| `mcps-507817-lifesaver-data` (private) | the on-prem store's live `lifesaver.sqlite`, `archive/` (replaced copies), `raw/<ts>/` (source `.dbf`s, deleted after 365 days), `ingest/state.json`; also `users.json`, the website's logins | `mason-ingest.yml`, `webapp/users.sh` |
 
 ## Layout
 
@@ -88,14 +77,15 @@ views come from the one shared converter, `sqlite_extract/extract.py`. See
 | `sqlite_extract/drive.py` | finds the newest LifeSaver upload (zip or plain folder) in the shared Drive folder and downloads only what's needed |
 | `sqlite_extract/extract.py` | LifeSaver `.dbf` tables (folder or zip) → `lifesaver.sqlite` (`python -m sqlite_extract.extract <dir\|zip> lifesaver.sqlite`) |
 | `sqlite_extract/ingest.py` / `ingest.sh` | Drive → build → sanity-check against the live copy → publish to GCS; what `mason-ingest.yml` runs |
-| `mason_reports/` | Mason's web report builder + SQL MCP server (separate image, deployed by hand to us-west1). See [its README](mason_reports/README.md) |
+| `mason_reports/` | Mason's SQL MCP server for claude.ai (separate image, deployed by hand to us-west1). See [its README](mason_reports/README.md) |
 | `sqlite_extract/importer.py` | `lifesaver.sqlite` → `core` warehouse (`python -m sqlite_extract.importer lifesaver.sqlite mason.db`). See [its README](sqlite_extract/README.md) |
 | `core/` | `visits.py`, `kpis.py`, `months.py` (pure functions), `store.py` (the shared SQLite tables), `models.py`, `config.py` |
-| `dashboard/build.py` | reads a store's warehouse → self-contained HTML (`index.html` main, `mason.html`) |
-| `dashboard/publish.sh` / `refresh.sh` | publish both pages to GCS / full daily cycle (pull → sync → publish) |
-| `.github/workflows/publish.yml` | on push to `main`: test → build+push image to GHCR → deploy MCP to Cloud Run → rebuild+publish the dashboard |
-| `.github/workflows/refresh.yml` | daily: cloud sync → recompute KPIs → publish dashboard |
-| `.github/workflows/mason-ingest.yml` | every 6 h: Mason Drive upload → `lifesaver.sqlite` → publish dashboard |
+| `webapp/` | the website: `server.py` (API), `data.py` (per-store data + pooled warehouse), `views.py`, `insights.py`, `frontend/` (React). See its [README](webapp/README.md) |
+| `stores.toml`, `core/stores.py` | the store registry |
+| `lsreports/` | the on-prem report builder's query layer |
+| `.github/workflows/publish.yml` | on push to `main`: test → build+push images to GHCR → deploy the MCP server and the website to Cloud Run |
+| `.github/workflows/refresh.yml` | daily: every cloud store → sync → recompute KPIs → save its warehouse |
+| `.github/workflows/mason-ingest.yml` | every 6 h: Mason Drive upload → validated `lifesaver.sqlite` |
 
 ## Setup
 
@@ -143,34 +133,40 @@ Deploying this to Cloud Run + GHCR: **[cloud/DEPLOY.md](cloud/DEPLOY.md)**.
 One tool: `get_work_order_list_report(start_date, end_date)` (ISO dates) → parsed
 work-order rows.
 
-## Retention warehouse + dashboard (Phase 3)
+## Retention warehouse + website (Phase 3)
 
-Main store (cloud):
+A cloud store (its login in `LIFESAVER_USERNAME` / `LIFESAVER_PASSWORD`; `WAREHOUSE_DB_PATH`
+picks the file, default `warehouse.db`):
 
 ```bash
 export LIFESAVER_USERNAME=... LIFESAVER_PASSWORD=...
 .venv/bin/python -m cloud.warehouse.job backfill   # full history, month by month, resumable
 .venv/bin/python -m cloud.warehouse.job kpis       # eyeball against the baselines
-.venv/bin/python -m dashboard.build          # -> dashboard/index.html
 ```
 
-Mason (LifeSaver desktop data). In production this is hands-off: the owner
-uploads to Drive and `mason-ingest.yml` does the rest. By hand:
+An on-prem store. In production this is hands-off: the owner uploads to Drive and
+`mason-ingest.yml` does the rest. By hand:
 
 ```bash
 # LifeSaver folder or zip -> lifesaver.sqlite (or: gcloud storage cp gs://mcps-507817-lifesaver-data/lifesaver.sqlite mason.sqlite)
 .venv/bin/python -m sqlite_extract.extract ~/Downloads/LifeSaver.zip mason.sqlite
-.venv/bin/python -m sqlite_extract.importer mason.sqlite mason.db
-.venv/bin/python -m dashboard.build --store mason --db mason.db --out dashboard/mason.html
+```
+
+Then see it in the website, locally ([webapp/README.md](webapp/README.md) has the full recipe):
+
+```bash
+(cd webapp/frontend && npm install && npm run build)
+STORE_MAIN_DATA=warehouse.db STORE_MASON_DATA=mason.sqlite AUTH_DISABLED=1 \
+  .venv/bin/uvicorn webapp.server:app --port 8765
 ```
 
 How the Drive ingest works, the `lifesaver.sqlite` data model, and the
 runbook (rejected uploads, force, rollback): [sqlite_extract/README.md](sqlite_extract/README.md).
 
 Full CLI and layer model: [cloud/warehouse/README.md](cloud/warehouse/README.md). Design,
-KPI definitions, and open questions: [dashboard/DESIGN.md](dashboard/DESIGN.md).
-`warehouse.db`, `warehouse_raw/`, and the rendered `dashboard/index.html` are all
-gitignored — the system of record is a GCS bucket (see DESIGN.md §15).
+KPI definitions, and open questions: [docs/kpi-design.md](docs/kpi-design.md).
+`warehouse.db` and `warehouse_raw/` are gitignored — each cloud store's system of record is the
+GCS warehouse bucket.
 
 ## Standalone script (no server)
 
