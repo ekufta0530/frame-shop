@@ -7,13 +7,18 @@ import { Card, MonthlyBars, Spark, TrendChart, storeColor, useColors, type BarSe
 import {
   addM, dlong, fmtUnit, ml, mlong, mname, monthRange, pctTxt, rel, relCls, usd, usdFull, MONTHS,
 } from '../format';
-import { tileFigures, yoyRows, type YoYTotals } from '../business';
+import { tileFigures, withoutOutliers, yoyRows, type YoYTotals } from '../business';
+import { useExcludeOutliers } from '../outliers';
 import { periodMonths, periodsFor, qMonths, type Period } from '../periods';
 import { renderMethod } from '../richtext';
 import type { Dashboard, KpiMeta, StoreInfo } from '../types';
 
-export default function StoreDashboard({ d, stores }: { d: Dashboard; stores: StoreInfo[] }) {
+export default function StoreDashboard({ d: raw, stores }: { d: Dashboard; stores: StoreInfo[] }) {
   const [params, setParams] = useSearchParams();
+  // the page-wide "Exclude outliers" setting: every tile, table and chart below renders this copy
+  const [exOn] = useExcludeOutliers();
+  const d = useMemo(() => (exOn ? withoutOutliers(raw) : raw), [raw, exOn]);
+  const O = d.business.outlier;
   const periods = useMemo(() => periodsFor(d.current_month, d.store.chart_from), [d.current_month, d.store.chart_from]);
   const p = periods.find((x) => x.id === params.get('p')) || periods[0];
   const snapshot = d.store.tier === 'on-prem' || d.store.tier === 'all';
@@ -40,6 +45,12 @@ export default function StoreDashboard({ d, stores }: { d: Dashboard; stores: St
             : <>Closed report · figures frozen at {mname(p.kind === 'quarter' ? qMonths(p.year, p.q!)[2] : p.asOf)} {p.year}</>}
         </span>
       </div>
+      {d.business.excluded && (
+        <p className="ex-note">
+          <b>Outliers excluded:</b> the {O.label} ({usdFull(O.total_rev)}, {O.months.map(ml).join(' & ')}) is left out of
+          every figure and chart below. Customer counts are unchanged — the customer still visited.
+        </p>
+      )}
 
       <div className="section-label">The business</div>
       <BusinessTiles d={d} p={p} />
@@ -154,13 +165,10 @@ function RevenueChart({ d, p, stores }: { d: Dashboard; p: Period; stores: Store
 
 function YoYTable({ d }: { d: Dashboard }) {
   const [mode, setMode] = useState<'calendar' | 'trailing'>('trailing');
-  const [ex, setEx] = useState(false);
   const B = d.business, OM = B.outlier.monthly, CUR = d.current_month, PARTIAL = B.partial_month;
-  const hasEx = B.outlier.total_v > 0;
+  const ex = !!B.excluded;
   const exMonths = B.outlier.months;
-  const isOut = (m: string) => exMonths.includes(m);
-  const { rows, totals: tot, totFrom } = yoyRows(d, mode, ex);
-  const months = rows.map((x) => x.cm);
+  const { rows, totals: tot, totFrom } = yoyRows(d, mode);
   const anyAff = rows.some((x) => x.aff);
   const avg = (rev: number, n: number) => (n > 0 ? rev / n : null);
 
@@ -180,24 +188,18 @@ function YoYTable({ d }: { d: Dashboard }) {
   const notes: string[] = [];
   if (rows.some((x) => x.ref)) notes.push(`${ml(rows[0].cm)} is shown for reference (the same month a year back); the total covers ${ml(totFrom)}–${ml(CUR)}.`);
   if (rows.some((x) => x.part)) notes.push(`MTD: through ${mname(PARTIAL).slice(0, 3)} ${B.partial_day}, against ${mname(PARTIAL).slice(0, 3)} 1–${B.partial_day}, ${addM(PARTIAL, -12).slice(0, 4)}.`);
-  if (ex && hasEx && anyAff) notes.push(exMonths.map((m) => `−${usdFull(OM[m]?.rev ?? 0)} (${ml(m)})`).join(', ') + ' removed.');
-  else if (ex && hasEx) notes.push(`The ${B.outlier.label} falls in ${exMonths.map(ml).join(' & ')}, outside this view.`);
+  if (ex && anyAff) notes.push(exMonths.map((m) => `−${usdFull(OM[m]?.rev ?? 0)} (${ml(m)})`).join(', ') + ' removed.');
+  else if (ex) notes.push(`The ${B.outlier.label} falls in ${exMonths.map(ml).join(' & ')}, outside this view.`);
 
   return (
     <Card title="Monthly performance vs. last year" wide
       blurb="Each month against the same month a year earlier. The open month is month-to-date against the same run of days last year."
-      right={<>
-        {hasEx && (
-          <label className="chk"><input type="checkbox" checked={ex} onChange={(e) => {
-            setEx(e.target.checked);
-            if (e.target.checked && mode === 'calendar' && !months.some((m) => isOut(m) || isOut(addM(m, -12)))) setMode('trailing');
-          }} /> Exclude the {B.outlier.label} <span className="muted">({usdFull(B.outlier.total_rev)})</span></label>
-        )}
+      right={
         <div className="seg" role="group" aria-label="Range">
           <button type="button" aria-pressed={mode === 'calendar'} onClick={() => setMode('calendar')}>Calendar year</button>
           <button type="button" aria-pressed={mode === 'trailing'} onClick={() => setMode('trailing')}>Trailing 12 months</button>
         </div>
-      </>}
+      }
       foot={notes.length ? notes.join(' ') : undefined}>
       <div className="tablewrap">
         <table className="data">

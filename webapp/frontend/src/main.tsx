@@ -60,7 +60,8 @@ function App() {
       {st.error && <div className="page"><div className="error">{st.error}</div></div>}
       {st.data && (
         <ErrorBoundary><Suspense fallback={loading}><Routes>
-          <Route path="/" element={<Overview stores={stores} />} />
+          <Route path="/" element={<Overview stores={stores} tab="dashboard" />} />
+          <Route path="/reports" element={<Overview stores={stores} tab="reports" />} />
           <Route path="/stores/:storeId" element={<StorePage stores={stores} tab="dashboard" />} />
           <Route path="/stores/:storeId/reports" element={<StorePage stores={stores} tab="reports" />} />
           <Route path="*" element={<div className="page"><div className="error">Page not found. <Link to="/">Back to the overview</Link></div></div>} />

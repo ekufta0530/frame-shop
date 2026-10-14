@@ -4,7 +4,7 @@ export type Tier = 'cloud' | 'on-prem' | 'all';
 
 export interface StoreInfo {
   id: string; name: string; tier: Tier; slot: number; ok: boolean; error: string | null;
-  data_through: string | null;
+  data_through: string | null; outlier_label: string;
 }
 export interface StoresResponse { stores: StoreInfo[]; combined_through: string | null }
 
@@ -19,6 +19,7 @@ export interface Dashboard {
   store: { id: string; name: string; tier: Tier; data_through: string; chart_from: string; method: string[] };
   meta: KpiMeta[];
   series: Record<string, Record<string, KpiPoint>>;
+  series_ex: Record<string, Record<string, KpiPoint>>;  // replaces those series when outliers are excluded
   cohorts: { m: string; n: number }[];
   summary: { customers: number; repeat_customers: number; visits: number; revenue: number;
     work_orders: number | null; first_day: string | null; last_day: string | null };
@@ -29,7 +30,11 @@ export interface Dashboard {
     all_time_revenue: number | null; first_day: string | null;
     partial_month: string; partial_day: number; days_in_partial: number;
     partial_ly_rev: number; partial_ly_v: number; partial_ly_rev_ex: number; partial_ly_v_ex: number;
-    outlier: { label: string; monthly: Record<string, MonthAgg>; months: string[]; total_rev: number; total_v: number };
+    outlier: {
+      label: string; monthly: Record<string, MonthAgg>; months: string[]; total_rev: number; total_v: number;
+      by_store: Record<string, Record<string, number>>;
+    };
+    excluded?: boolean;  // set by withoutOutliers: every figure here already has the outliers taken out
   };
   calc_version: number;
 }
@@ -44,6 +49,9 @@ export interface OverviewRow {
   kpis: Record<string, number | null>;
   history: Record<string, Record<string, number | null>>;
   monthly: Record<string, MonthAgg>;
+  outlier_monthly: Record<string, MonthAgg>;
+  kpis_ex: Record<string, number | null>;
+  history_ex: Record<string, Record<string, number | null>>;
 }
 export interface Overview {
   report_month: string | null; report_through: string | null; common_through: string | null;

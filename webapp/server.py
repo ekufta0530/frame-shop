@@ -6,6 +6,7 @@ Pages (client-side routes, all served index.html):
     /                       all-stores overview: stores side by side + the pooled dashboard
     /stores/<id>            one store's dashboard (+ the on-prem section for on-prem stores)
     /stores/<id>/reports    report builder + SQL console (every store; cloud stores have fewer fields)
+    /reports                the same over every store pooled
     /login
     /privacy, /terms        the public privacy policy and terms (served by the API, not the SPA)
     /mcp/<token>            the MCP server for Claude (webapp/mcp_server.py; its own token, not the login)
@@ -20,6 +21,7 @@ import contextlib
 import logging
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -112,7 +114,11 @@ def _store_or_404(snap, store_id: str):
 
 def _reports_or_404(snap, store_id: str):
     """The store, if its reports DB is ready: on-prem its lifesaver.sqlite, cloud a rolled-up copy of
-    its warehouse with fewer fields (sd.level says which)."""
+    its warehouse with fewer fields (sd.level says which); "all" the pooled copy of every store's."""
+    if store_id == ALL_STORES:
+        if snap.reports_path is None:
+            raise HTTPException(503, f"All stores: report data unavailable ({snap.reports_error or 'no store has data'})")
+        return SimpleNamespace(reports_path=snap.reports_path, level=semantic.POOLED)
     sd = _store_or_404(snap, store_id)
     if sd.reports_path is None:
         raise HTTPException(503, f"{sd.store.name}: report data unavailable ({sd.reports_error})")
@@ -136,6 +142,7 @@ def stores():
         "stores": [{
             "id": s.store.id, "name": s.store.name, "tier": s.store.tier, "slot": i,
             "ok": s.ok, "error": s.error,
+            "outlier_label": (s.store.outlier_label or "one-off outlier") if s.store.outliers else "",
             "data_through": s.data_through.isoformat() if s.data_through else None,
         } for i, s in enumerate(snap.stores)],
         "combined_through": snap.combined_through.isoformat() if snap.combined_through else None,

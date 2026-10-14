@@ -200,6 +200,13 @@ def test_reports_tab_works_for_cloud_stores_with_their_fields(site):
     assert site.get("/api/stores/shop/insights").status_code == 404  # in-store detail stays on-prem
 
 
+def test_reports_tab_works_for_all_stores_pooled(site):
+    cat = site.get("/api/stores/all/catalog").json()
+    assert "store" in cat["datasets"]["work_orders"]["dimensions"]
+    r = site.post("/api/stores/all/report", json={"dimensions": ["store"], "metrics": ["jobs"]})
+    assert r.status_code == 200 and len(r.json()["rows"]) == 2
+
+
 # --- over HTTP, inside the website -------------------------------------------------------
 
 H = {"accept": "application/json, text/event-stream", "content-type": "application/json"}

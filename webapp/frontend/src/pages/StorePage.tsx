@@ -1,6 +1,7 @@
-import { NavLink, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../api';
 import { Card, ReportChart } from '../charts';
+import { OutlierToggle, ViewTabs } from '../controls';
 import { dlong, dimText, fmtValue } from '../format';
 import type { Dashboard, Insight, Insights, StoreInfo } from '../types';
 import ReportBuilder from './ReportBuilder';
@@ -23,11 +24,9 @@ export default function StorePage({ stores, tab }: { stores: StoreInfo[]; tab: '
               : 'Data unavailable'}
           </div>
         </div>
+        {tab === 'dashboard' && <div className="actions"><OutlierToggle labels={info.outlier_label ? [info.outlier_label] : []} /></div>}
       </div>
-      <nav className="subtabs">
-        <NavLink to={`/stores/${info.id}`} end>Dashboard</NavLink>
-        <NavLink to={`/stores/${info.id}/reports`}>Reports</NavLink>
-      </nav>
+      <ViewTabs base={`/stores/${info.id}`} reports={`/stores/${info.id}/reports`} />
       {!info.ok ? <div className="error">{info.name}: data unavailable — {info.error}</div>
         : tab === 'reports' ? <ReportBuilder storeId={info.id} />
           : <StoreBody info={info} stores={stores} />}
@@ -53,7 +52,7 @@ function OnPremSection({ storeId }: { storeId: string }) {
   return (
     <>
       <div className="section-label" style={{ marginTop: 34 }}>
-        In-store detail <span className="hint">— from the full LifeSaver database ({d?.work_orders.toLocaleString() ?? '…'} work orders); build your own under Reports</span>
+        In-store detail <span className="hint">— from the full LifeSaver database ({d?.work_orders.toLocaleString() ?? '…'} work orders); build your own under <Link to={`/stores/${storeId}/reports`}>Reports</Link></span>
       </div>
       {ins.error && <div className="error">{ins.error}</div>}
       {!d && ins.loading && <div className="loading">Loading…</div>}

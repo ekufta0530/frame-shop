@@ -3,16 +3,19 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../api';
 import { Card, MonthlyBars, MultiLine, storeColor, useColors, type BarSeries } from '../charts';
+import { OutlierToggle, ViewTabs } from '../controls';
 import { dlong, fmtUnit, mlong, monthRange, pctTxt, rel, relCls, usd, usdFull } from '../format';
+import { useExcludeOutliers } from '../outliers';
 import type { Dashboard, Overview as OverviewData, OverviewRow, PeriodStats, StoreInfo } from '../types';
+import ReportBuilder from './ReportBuilder';
 import StoreDashboard from './StoreDashboard';
 
 type PeriodKey = 'month' | 'ytd' | 'ttm';
 
-export default function Overview({ stores }: { stores: StoreInfo[] }) {
-  const ov = useApi<OverviewData>('/api/overview');
-  const dash = useApi<Dashboard>('/api/stores/all/dashboard');
+export default function Overview({ stores, tab }: { stores: StoreInfo[]; tab: 'dashboard' | 'reports' }) {
+  const ov = useApi<OverviewData>(tab === 'dashboard' ? '/api/overview' : null);
   const o = ov.data;
+  const outliers = stores.filter((s) => s.ok && s.outlier_label).map((s) => s.outlier_label);
   return (
     <div className="page">
       <div className="page-head">
@@ -20,10 +23,23 @@ export default function Overview({ stores }: { stores: StoreInfo[] }) {
           <h1>All stores</h1>
           <div className="sub">
             {stores.length} store{stores.length === 1 ? '' : 's'}
-            {o?.common_through && <> · compared through {dlong(o.common_through)}, the oldest store's latest data</>}
+            {tab === 'reports' ? <> · every store pooled into one</>
+              : o?.common_through && <> · compared through {dlong(o.common_through)}, the oldest store's latest data</>}
           </div>
         </div>
+        {tab === 'dashboard' && <div className="actions"><OutlierToggle labels={outliers} /></div>}
       </div>
+      <ViewTabs base="/" reports="/reports" />
+      {tab === 'reports' ? <ReportBuilder storeId="all" /> : <OverviewBody ov={ov} stores={stores} />}
+    </div>
+  );
+}
+
+function OverviewBody({ ov, stores }: { ov: ReturnType<typeof useApi<OverviewData>>; stores: StoreInfo[] }) {
+  const dash = useApi<Dashboard>('/api/stores/all/dashboard');
+  const o = ov.data;
+  return (
+    <>
       {o?.unavailable.map((u) => (
         <div className="banner" key={u.id}><b>{u.name}</b>: data unavailable, so it's left out of every figure below. ({u.error})</div>
       ))}
@@ -40,27 +56,27 @@ export default function Overview({ stores }: { stores: StoreInfo[] }) {
       {dash.error && <div className="error">{dash.error}</div>}
       {dash.loading && !dash.data && <div className="loading">Loading…</div>}
       {dash.data && <StoreDashboard d={dash.data} stores={stores} />}
-    </div>
+    </>
   );
 }
 
 function Comparison({ o, stores }: { o: OverviewData; stores: StoreInfo[] }) {
   const c = useColors();
   const [period, setPeriod] = useState<PeriodKey>('ttm');
-  const [ex, setEx] = useState(false);
+  const [ex] = useExcludeOutliers();
   const report = o.report_month!;
   const slot = (id: string) => stores.find((s) => s.id === id)?.slot ?? 99;
-  const anyOutliers = o.stores.some((s) => s.outlier_label);
   const labels: Record<PeriodKey, string> = {
     month: mlong(report), ytd: `${report.slice(0, 4)} to ${mlong(report).slice(0, 3)}`, ttm: `12 months to ${mlong(report)}`,
   };
   const months = monthRange(o.history_from!, report);
   const revSeries: BarSeries[] = o.stores.map((s) => ({
     key: s.id, label: s.name, color: storeColor(c, slot(s.id)),
-    values: Object.fromEntries(Object.entries(s.monthly).map(([m, x]) => [m, x.rev])),
+    values: Object.fromEntries(Object.entries(s.monthly).map(([m, x]) => [m, x.rev - (ex ? s.outlier_monthly[m]?.rev ?? 0 : 0)])),
   }));
   const lines = (metric: string) => o.stores.map((s) => ({
-    key: s.id, label: s.name, color: storeColor(c, slot(s.id)), values: s.history[metric] || {},
+    key: s.id, label: s.name, color: storeColor(c, slot(s.id)),
+    values: (ex && s.history_ex[metric]) || s.history[metric] || {},
   }));
 
   return (
@@ -74,13 +90,7 @@ function Comparison({ o, stores }: { o: OverviewData; stores: StoreInfo[] }) {
             </button>
           ))}
         </div>
-        <span className="muted">{labels[period]} vs the same months a year earlier</span>
-        {anyOutliers && (
-          <label className="chk" style={{ marginLeft: 'auto' }}>
-            <input type="checkbox" checked={ex} onChange={(e) => setEx(e.target.checked)} />
-            Exclude one-off outliers <span className="muted">({o.stores.filter((s) => s.outlier_label).map((s) => s.outlier_label).join(', ')})</span>
-          </label>
-        )}
+        <span className="muted">{labels[period]} vs the same months a year earlier{ex && o.stores.some((s) => s.outlier_label) ? ' · outliers excluded' : ''}</span>
       </div>
       <div className="card" style={{ padding: '4px 4px 6px' }}>
         <div className="tablewrap">
@@ -150,7 +160,7 @@ function Row({ s, st, ex, color, info, total }: {
       <td className="num">{v ? usd(t) : '—'}</td>{hadLy ? d(rel(t, lyT)) : <td className="num muted">—</td>}
       <td className="num">{st.new.toLocaleString()}</td>{hadLy ? d(rel(st.new, st.ly_new)) : <td className="num muted">—</td>}
       <td className="num">{fmtUnit(s.kpis.active_customers_ttm, 'int')}</td>
-      <td className="num">{fmtUnit(s.kpis.repeat_revenue_share, 'pct')}</td>
+      <td className="num">{fmtUnit(ex && 'repeat_revenue_share' in s.kpis_ex ? s.kpis_ex.repeat_revenue_share : s.kpis.repeat_revenue_share, 'pct')}</td>
       <td className="num">{fmtUnit(s.kpis.first_to_second_rate, 'pct')}</td>
     </tr>
   );

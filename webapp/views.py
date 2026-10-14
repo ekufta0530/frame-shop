@@ -180,6 +180,33 @@ def _series(c: sqlite3.Connection) -> dict[str, dict[str, dict]]:
     return out
 
 
+def _outlier_visits(c: sqlite3.Connection, outliers: list[str]) -> list[dict]:
+    """The excluded visits one by one: month, revenue, and whether it was a return visit."""
+    if not outliers:
+        return []
+    qs = ",".join("?" * len(outliers))
+    return [{"id": r["visit_id"], "m": r["visit_date"][:7], "rev": r["revenue"] or 0.0,
+             "repeat": r["visit_rank"] >= 2} for r in c.execute(
+        f"SELECT visit_id, visit_date, revenue, visit_rank FROM visits WHERE visit_id IN ({qs})",
+        outliers)]
+
+
+def _repeat_share_ex(points: dict[str, tuple[float | None, float | None]], outs: list[dict]) -> dict:
+    """repeat_revenue_share with the outliers taken out of every trailing-12-month window they fall
+    in: their revenue leaves the denominator, and the numerator too if they were return visits."""
+    out = {}
+    for m, (n, d) in points.items():
+        if n is None or d is None:
+            continue
+        lo = _shift(m, -11)
+        for o in outs:
+            if lo <= o["m"] <= m:
+                d -= o["rev"]
+                n -= o["rev"] if o["repeat"] else 0.0
+        out[m] = {"v": n / d if d > 0 else None, "n": round(n, 2), "d": round(d, 2)}
+    return out
+
+
 def store_view(cfg: ViewConfig, warehouse: Path, today: date) -> dict:
     """Everything the store dashboard renders, for the warehouse's data through ``today``."""
     c = _connect(warehouse)
@@ -229,6 +256,7 @@ def store_view(cfg: ViewConfig, warehouse: Path, today: date) -> dict:
         otot = c.execute(
             f"SELECT COALESCE(ROUND(SUM(revenue), 2), 0) rev, COUNT(*) v FROM visits "
             f"WHERE visit_id IN ({qs})", outliers).fetchone()
+        outs = _outlier_visits(c, outliers)
 
         by_store = None
         if cfg.tier == "all":
@@ -248,6 +276,19 @@ def store_view(cfg: ViewConfig, warehouse: Path, today: date) -> dict:
     meta = [{**m, "plot_from": plot_from[m["kind"]], "baseline": cfg.baselines.get(m["key"])}
             for m in META]
 
+    # what changes when the page excludes the outliers; the customer-count KPIs don't (the customer
+    # still visited), only the revenue-weighted one does
+    rrs = series["repeat_revenue_share"]
+    series_ex = {"repeat_revenue_share": {
+        m: {**x, "final": rrs[m]["final"]}
+        for m, x in _repeat_share_ex({m: (p["n"], p["d"]) for m, p in rrs.items()}, outs).items()
+    }} if outs else {}
+    outlier_by_store: dict[str, dict[str, float]] = {}
+    if cfg.tier == "all":
+        for o in outs:
+            row = outlier_by_store.setdefault(o["id"].split("/", 1)[0], {})
+            row[o["m"]] = round(row.get(o["m"], 0.0) + o["rev"], 2)
+
     return {
         "store": {
             "id": cfg.id, "name": cfg.name, "tier": cfg.tier,
@@ -257,6 +298,7 @@ def store_view(cfg: ViewConfig, warehouse: Path, today: date) -> dict:
         },
         "meta": meta,
         "series": series,
+        "series_ex": series_ex,
         "cohorts": cohorts,
         "summary": s,
         "current_month": current,
@@ -275,6 +317,7 @@ def store_view(cfg: ViewConfig, warehouse: Path, today: date) -> dict:
                 "monthly": outlier_monthly,
                 "months": list(outlier_monthly),
                 "total_rev": otot["rev"], "total_v": otot["v"],
+                "by_store": outlier_by_store,
             },
         },
         "calc_version": CALC_VERSION,
@@ -341,12 +384,33 @@ def overview_row(cfg: ViewConfig, warehouse: Path, report: date, history_from: d
             "WHERE visit_date BETWEEN ? AND ? GROUP BY m ORDER BY m",
             (add_months(history_from, -12).isoformat(), month_end(report).isoformat()))}
         first_day = c.execute("SELECT MIN(visit_date) FROM visits").fetchone()[0]
+        outs = _outlier_visits(c, outliers)
+        rrs = {r["m"]: (r["numerator"], r["denominator"]) for r in c.execute(
+            "SELECT substr(month, 1, 7) m, numerator, denominator FROM kpi_monthly WHERE calc_version = ? "
+            "AND metric = 'repeat_revenue_share' AND month BETWEEN ? AND ?",
+            (CALC_VERSION, history_from.isoformat(), report.isoformat()))} if outs else {}
     finally:
         c.close()
     return {
         "id": cfg.id, "name": cfg.name, "tier": cfg.tier, "first_day": first_day,
         "outlier_label": cfg.outlier_label if outliers else "",
         "periods": periods, "kpis": kpis, "history": hist, "monthly": monthly,
+        **_overview_ex(outs, rrs, report),
+    }
+
+
+def _overview_ex(outs: list[dict], rrs: dict, report: date) -> dict:
+    """The parts of an overview row that change when the page excludes the outliers."""
+    monthly: dict[str, dict] = {}
+    for o in outs:
+        x = monthly.setdefault(o["m"], {"rev": 0.0, "v": 0})
+        x["rev"] = round(x["rev"] + o["rev"], 2)
+        x["v"] += 1
+    rrs_ex = {m: x["v"] for m, x in _repeat_share_ex(rrs, outs).items()}
+    return {
+        "outlier_monthly": monthly,
+        "kpis_ex": {"repeat_revenue_share": rrs_ex[_ym(report)]} if _ym(report) in rrs_ex else {},
+        "history_ex": {"repeat_revenue_share": rrs_ex} if rrs_ex else {},
     }
 
 

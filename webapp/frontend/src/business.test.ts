@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tileFigures, yoyRows } from './business';
+import { tileFigures, withoutOutliers, yoyRows } from './business';
 import { periodsFor } from './periods';
 import type { Dashboard } from './types';
 
@@ -11,8 +11,10 @@ function dash(monthly: Record<string, { rev: number; v: number }>): Dashboard {
       monthly, by_store: null, all_time_revenue: 0, first_day: '2024-08-01',
       partial_month: '2026-09', partial_day: 14, days_in_partial: 30,
       partial_ly_rev: 400, partial_ly_v: 4, partial_ly_rev_ex: 300, partial_ly_v_ex: 3,
-      outlier: { label: 'x', monthly: { '2025-10': { rev: 500, v: 1 } }, months: ['2025-10'], total_rev: 500, total_v: 1 },
+      outlier: { label: 'x', monthly: { '2025-10': { rev: 500, v: 1 } }, months: ['2025-10'], total_rev: 500, total_v: 1, by_store: {} },
     },
+    series: { repeat_revenue_share: { '2025-10': { v: 0.5, n: 1, d: 2, final: true } }, active_customers_ttm: {} },
+    series_ex: { repeat_revenue_share: { '2025-10': { v: 0.25, n: 1, d: 4, final: true } } },
   } as unknown as Dashboard;
 }
 const months = (from: number, to: number, rev: number) =>
@@ -59,20 +61,38 @@ describe('tileFigures', () => {
 describe('yoyRows', () => {
   const d = dash({ ...months(1, 12, 1000), '2025-10': { rev: 1500, v: 2 }, '2026-09': { rev: 700, v: 7 } });
   it('uses last year\'s partial-month figure for the open month', () => {
-    const { rows } = yoyRows(d, 'trailing', false);
+    const { rows } = yoyRows(d, 'trailing');
     const open = rows.find((r) => r.cm === '2026-09')!;
     expect([open.pyR, open.pyV]).toEqual([400, 4]);
   });
   it('removing outliers subtracts them from both years and flags the affected rows', () => {
-    const { rows } = yoyRows(d, 'trailing', true);
+    const { rows } = yoyRows(withoutOutliers(d), 'trailing');
     const oct = rows.find((r) => r.cm === '2025-10')!;
     expect(oct.cyR).toBe(1000);
     expect(oct.aff).toBe(true);
+    const open = rows.find((r) => r.cm === '2026-09')!;
+    expect([open.pyR, open.pyV, open.aff]).toEqual([300, 3, false]);
   });
   it('the trailing total covers 12 months; the extra first row is reference only', () => {
-    const { rows, totFrom } = yoyRows(d, 'trailing', false);
+    const { rows, totFrom } = yoyRows(d, 'trailing');
     expect(rows[0].ref).toBe(true);
     expect(rows.filter((r) => !r.ref)).toHaveLength(12);
     expect(totFrom).toBe('2025-10');
+  });
+});
+
+describe('withoutOutliers', () => {
+  const d = dash({ ...months(1, 12, 1000), '2025-10': { rev: 1500, v: 2 } });
+  it('takes the outliers out of the tiles, the revenue series and the revenue-weighted KPI only', () => {
+    const x = withoutOutliers(d);
+    expect(x.business.monthly['2025-10']).toEqual({ rev: 1000, v: 1 });
+    expect(x.series.repeat_revenue_share['2025-10'].v).toBe(0.25);
+    expect(x.series.active_customers_ttm).toBe(d.series.active_customers_ttm);
+    const open = periodsFor('2026-09', '2024-08')[0];
+    expect(tileFigures(x, open).lyRev).toBe(300);
+  });
+  it('leaves a dashboard without outliers untouched', () => {
+    const none = { ...d, business: { ...d.business, outlier: { ...d.business.outlier, total_v: 0 } } };
+    expect(withoutOutliers(none)).toBe(none);
   });
 });

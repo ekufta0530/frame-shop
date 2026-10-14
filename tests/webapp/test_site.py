@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.config import get_kpi_settings
+from core.kpis import compute_kpis
 from core.store import DATA_THROUGH, Warehouse
 from core.stores import Store
 from core.visits import LineForVisit, build_visits
@@ -182,3 +183,30 @@ def test_background_refresh_serves_the_old_snapshot_without_waiting(stores, tmp_
         assert out == [first]  # ...but readers still get the current data immediately
     finally:
         mgr._lock.release()
+
+
+def test_outliers_come_out_of_the_revenue_weighted_kpi_and_the_overview(stores, tmp_path, monkeypatch):
+    # shop's c4 return visit (Aug 2025, 70.0) is the one-off; ids come from build_visits
+    with Warehouse(stores[0].data) as wh:
+        visits = wh.load_all_visits()
+        for m in (date(2025, 7, 1), date(2025, 8, 1)):
+            wh.upsert_kpi_snapshots(compute_kpis(visits, m, today=date(2025, 9, 10)))
+    out = next(v.visit_id for v in visits if v.customer_id == "c4" and v.visit_rank == 2)
+    stores[0] = Store(id="shop", name="Shop", tier="cloud", data=stores[0].data,
+                      outliers=(out,), outlier_label="big order")
+    monkeypatch.setattr(server, "manager", DataManager(stores, tmp_path / "cache2"))
+    monkeypatch.setattr(auth, "AUTH_DISABLED", True)
+    server._cache.clear()
+    server._cache_version["v"] = None
+    client = TestClient(server.app)
+
+    assert client.get("/api/stores").json()["stores"][0]["outlier_label"] == "big order"
+    d = client.get("/api/stores/shop/dashboard").json()
+    raw, ex = d["series"]["repeat_revenue_share"]["2025-08"], d["series_ex"]["repeat_revenue_share"]["2025-08"]
+    assert ex["d"] == pytest.approx(raw["d"] - 70.0) and ex["n"] == pytest.approx(raw["n"] - 70.0)
+    assert "active_customers_ttm" not in d["series_ex"]  # customer counts don't change
+    pooled = client.get("/api/stores/all/dashboard").json()["business"]["outlier"]["by_store"]
+    assert pooled == {"shop": {"2025-08": 70.0}}
+    shop = client.get("/api/overview").json()["stores"][0]
+    assert shop["outlier_monthly"] == {"2025-08": {"rev": 70.0, "v": 1}}
+    assert "repeat_revenue_share" in shop["history_ex"]
