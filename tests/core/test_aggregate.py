@@ -64,15 +64,19 @@ def test_months_iterate_through_the_cutoff(tmp_path):
 
 
 def test_sources_are_only_read(tmp_path):
+    import hashlib
     import os
     make_store(tmp_path / "a.db", A)
     for f in tmp_path.glob("a.db*"):
         os.chmod(f, 0o444)
-    os.chmod(tmp_path, 0o555)
-    try:
-        out = build_combined([("a", tmp_path / "a.db")], tmp_path.parent / f"{tmp_path.name}-all.db",
-                             through=date(2024, 12, 31))
-    finally:
-        os.chmod(tmp_path, 0o755)
+
+    def content():
+        return {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in tmp_path.glob("a.db*")}
+    before = content()
+    out = build_combined([("a", tmp_path / "a.db")], tmp_path / "all.db", through=date(2024, 12, 31))
     assert out["visits"] == 3
-    assert not list(tmp_path.glob("a.db-wal")) or True  # no new sidecar needed to read
+    after = content()
+    assert {k: after[k] for k in before} == before  # nothing that existed was written to
+    empty = hashlib.sha256(b"").hexdigest()
+    # SQLite may add scratch sidecars (-shm, an empty -wal) just to read a WAL-mode database
+    assert all(after[k] == empty or k.endswith("-shm") for k in after.keys() - before.keys())
