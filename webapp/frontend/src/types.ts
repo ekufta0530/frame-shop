@@ -72,6 +72,7 @@ export interface Catalog {
     metrics: Record<string, { label: string; format: string }>;
   }>;
   presets: { id: string; title: string; description: string; group: string; spec: ReportSpec; chart: string }[];
+  limits: string | null;  // set for a cloud store: what its data lacks
   data: { latest_order_date: string; work_orders: number };
 }
 

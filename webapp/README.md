@@ -1,8 +1,8 @@
 # webapp — the Frame Shop website
 
 One site for every store: **Overview** (stores side by side + all stores pooled), a **dashboard per
-store**, and for on-prem stores an **in-store detail** section and a **Reports** tab (report builder +
-SQL console). React + Vite frontend (`frontend/`), FastAPI backend (`server.py`), one container
+store** with a **Reports** tab (report builder + SQL console), and for on-prem stores an **in-store
+detail** section. React + Vite frontend (`frontend/`), FastAPI backend (`server.py`), one container
 (`Dockerfile`), Cloud Run service `frame-shop` in us-west1. The same service is also the **MCP server**
 for Claude over every store (`/mcp/<token>`, see [Claude connector](#claude-connector-mcp)).
 
@@ -19,7 +19,7 @@ stores.toml ──▶ webapp.data.DataManager ──▶ webapp.views / insights 
 | | **cloud** | **on-prem** |
 |---|---|---|
 | Source | Lifesaver Cloud's Work Order List report, scraped daily | the store's own LifeSaver database files, uploaded by the owner to Drive |
-| Detail | work orders only → the dashboard every store gets | the full database → the dashboard **plus** in-store detail and Reports |
+| Detail | work orders only → the dashboard, and Reports on the Work Order List's fields (customers, dates, status, price, discount) | the full database → the dashboard, **in-store detail**, and Reports on every field (salesperson, components, vendors, cost/margin, tax) |
 | Customers | matched by name | LifeSaver customer number |
 | "Today" | the clock (daily sync) | the newest order in the upload |
 

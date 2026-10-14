@@ -5,7 +5,7 @@ Software: one website for every store, fed by two kinds of data source.
 
 | Dir | What |
 |---|---|
-| [`webapp/`](webapp/) | **The website** (React + FastAPI, Cloud Run): all-stores overview, a dashboard per store, and for on-prem stores an in-store detail section and a report builder / SQL console. Also **the MCP server for Claude** over every store (`/mcp/<token>`). [README](webapp/README.md) |
+| [`webapp/`](webapp/) | **The website** (React + FastAPI, Cloud Run): all-stores overview, a dashboard and a report builder / SQL console per store, and for on-prem stores an in-store detail section. Also **the MCP server for Claude** over every store (`/mcp/<token>`). [README](webapp/README.md) |
 | [`stores.toml`](stores.toml) | Every store: id, name, tier (`cloud` / `on-prem`), and where its data lives. Adding a cloud store is an entry here + a secret |
 | [`cloud/`](cloud/) | **Cloud tier.** Everything that talks to Lifesaver Cloud (`lsscloud.com`): the report scraper (`lifesaver/`), the warehouse ingest that accumulates report pulls (`warehouse/`), one-off pull scripts |
 | [`sqlite_extract/`](sqlite_extract/) | **On-prem tier.** Turns a store's own LifeSaver data (uploaded to Google Drive by the owner) into `lifesaver.sqlite`, then into KPI tables -- no scraping |
@@ -35,7 +35,7 @@ lsscloud.com ── Work Order List report          owner drags LifeSaver folder
                                  ▼   (re-read every 10 min; on-prem KPIs derived on arrival)
                        webapp (Cloud Run "frame-shop")
                          /              all stores: side by side + pooled
-                         /stores/<id>   one store (+ in-store detail and Reports if on-prem)
+                         /stores/<id>   one store + its Reports (+ in-store detail if on-prem)
                          /mcp/<token>   the MCP server for Claude: every store, or all pooled
 ```
 

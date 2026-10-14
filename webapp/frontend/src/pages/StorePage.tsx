@@ -24,14 +24,12 @@ export default function StorePage({ stores, tab }: { stores: StoreInfo[]; tab: '
           </div>
         </div>
       </div>
-      {onPrem && (
-        <nav className="subtabs">
-          <NavLink to={`/stores/${info.id}`} end>Dashboard</NavLink>
-          <NavLink to={`/stores/${info.id}/reports`}>Reports</NavLink>
-        </nav>
-      )}
+      <nav className="subtabs">
+        <NavLink to={`/stores/${info.id}`} end>Dashboard</NavLink>
+        <NavLink to={`/stores/${info.id}/reports`}>Reports</NavLink>
+      </nav>
       {!info.ok ? <div className="error">{info.name}: data unavailable — {info.error}</div>
-        : tab === 'reports' && onPrem ? <ReportBuilder storeId={info.id} />
+        : tab === 'reports' ? <ReportBuilder storeId={info.id} />
           : <StoreBody info={info} stores={stores} />}
     </div>
   );

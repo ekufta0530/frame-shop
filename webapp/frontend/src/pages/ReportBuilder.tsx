@@ -84,6 +84,7 @@ export default function ReportBuilder({ storeId }: { storeId: string }) {
           <button type="button" aria-pressed={tab === 'sql'} onClick={() => setTab('sql')}>SQL</button>
         </div>
         {catalog && <span className="muted">{catalog.data.work_orders.toLocaleString()} work orders · newest {catalog.data.latest_order_date}</span>}
+        {catalog?.limits && <span className="muted">· {catalog.limits[0].toUpperCase() + catalog.limits.slice(1)}</span>}
       </div>
       {error && <div className="error">Could not load the report catalog: {error}</div>}
       {catalog && (tab === 'reports' ? <Builder storeId={storeId} catalog={catalog} /> : <SqlConsole storeId={storeId} />)}
@@ -100,7 +101,8 @@ function Builder({ storeId, catalog }: { storeId: string; catalog: Catalog }) {
   const [state, setState] = useState<State>(() => {
     const h = new URLSearchParams(location.hash.slice(1));
     if (h.get('r')) { try { return decode(h.get('r')!); } catch { /* fall through */ } }
-    const p = catalog.presets.find((x) => x.id === (h.get('preset') || 'yearly_summary'));
+    // a cloud store has fewer presets: fall back to the first it has
+    const p = catalog.presets.find((x) => x.id === (h.get('preset') || 'yearly_summary')) ?? catalog.presets[0];
     return p ? fromPreset(p) : blank();
   });
   const [result, setResult] = useState<ReportResult | null>(null);
@@ -455,29 +457,35 @@ function ResultTable({ result, sort, setSort }: {
 
 // ---- SQL console ---------------------------------------------------------------------
 
-const SQL_EXAMPLES: Record<string, string> = {
-  'Repeat customers': `SELECT customer_name, COUNT(*) AS jobs, ROUND(SUM(subtotal)) AS sales,
+// `needs`: the tables ("t") or columns ("t.col") an example uses -- it's offered only where they exist,
+// so a cloud store (no components, payments or customer addresses) only sees the ones it can run.
+const SQL_EXAMPLES: Record<string, { needs: string[]; sql: string }> = Object.fromEntries(Object.entries({
+  'Repeat customers': [['wo_facts.cust_no', 'wo_facts.customer_name'], `SELECT customer_name, COUNT(*) AS jobs, ROUND(SUM(subtotal)) AS sales,
   MIN(order_date) AS first_order, MAX(order_date) AS last_order
 FROM wo_facts WHERE status != 'Void'
-GROUP BY cust_no HAVING jobs >= 5 ORDER BY sales DESC LIMIT 100;`,
-  'Lapsed customers (no order in 2 years before the newest order)': `SELECT customer_name, customer_city, COUNT(*) AS jobs, ROUND(SUM(subtotal)) AS lifetime_sales,
+GROUP BY cust_no HAVING jobs >= 5 ORDER BY sales DESC LIMIT 100;`],
+  'Biggest discounts': [['wo_facts.discount_amt', 'wo_facts.list_subtotal'], `SELECT order_date, customer_name, description,
+  list_subtotal, discount_amt, ROUND(100.0 * discount_amt / list_subtotal, 1) AS discount_pct
+FROM wo_facts WHERE status != 'Void' AND discount_amt > 0
+ORDER BY discount_amt DESC LIMIT 100;`],
+  'Lapsed customers (no order in 2 years before the newest order)': [['wo_facts.customer_city'], `SELECT customer_name, customer_city, COUNT(*) AS jobs, ROUND(SUM(subtotal)) AS lifetime_sales,
   MAX(order_date) AS last_order
 FROM wo_facts WHERE status != 'Void'
 GROUP BY cust_no HAVING last_order < (SELECT date(MAX(order_date), '-2 years') FROM wo_facts) AND jobs >= 3
-ORDER BY lifetime_sales DESC LIMIT 100;`,
-  'Moulding cost vs price per foot': `SELECT comp_name, comp_vendor, COUNT(*) AS uses, ROUND(SUM(comp_feet)) AS feet,
+ORDER BY lifetime_sales DESC LIMIT 100;`],
+  'Moulding cost vs price per foot': [['comp_facts'], `SELECT comp_name, comp_vendor, COUNT(*) AS uses, ROUND(SUM(comp_feet)) AS feet,
   ROUND(SUM(comp_cost) / SUM(comp_feet), 2) AS cost_per_ft,
   ROUND(SUM(comp_net_price) / SUM(comp_feet), 2) AS price_per_ft
 FROM comp_facts WHERE comp_kind = 'Moulding' AND comp_feet > 0 AND status != 'Void'
-GROUP BY 1, 2 HAVING uses >= 20 ORDER BY uses DESC;`,
-  'Revision history of one work order': `SELECT fwkorderno, frevision, frevdate, fstatustxt, fsubt, fdesc
-FROM work_order_revisions WHERE fwkorderno = 12433 ORDER BY frevision;`,
-  'Payments by month and type': `SELECT strftime('%Y-%m', pydate) AS month, pypaid AS pay_type, COUNT(*) AS n, ROUND(SUM(pydeposit)) AS amount
-FROM payments GROUP BY 1, 2 ORDER BY 1 DESC, 4 DESC LIMIT 200;`,
-};
+GROUP BY 1, 2 HAVING uses >= 20 ORDER BY uses DESC;`],
+  'Revision history of one work order': [['work_order_revisions'], `SELECT fwkorderno, frevision, frevdate, fstatustxt, fsubt, fdesc
+FROM work_order_revisions WHERE fwkorderno = 12433 ORDER BY frevision;`],
+  'Payments by month and type': [['payments'], `SELECT strftime('%Y-%m', pydate) AS month, pypaid AS pay_type, COUNT(*) AS n, ROUND(SUM(pydeposit)) AS amount
+FROM payments GROUP BY 1, 2 ORDER BY 1 DESC, 4 DESC LIMIT 200;`],
+} as Record<string, [string[], string]>).map(([k, [needs, sql]]) => [k, { needs, sql }]));
 
 function SqlConsole({ storeId }: { storeId: string }) {
-  const [sql, setSql] = useState(SQL_EXAMPLES['Repeat customers']);
+  const [sql, setSql] = useState(SQL_EXAMPLES['Repeat customers'].sql);
   const [schema, setSchema] = useState<{ name: string; type: string; columns: string[] }[] | null>(null);
   const [res, setRes] = useState<{ columns: string[]; rows: unknown[][]; truncated: boolean } | null>(null);
   const [error, setError] = useState('');
@@ -494,6 +502,8 @@ function SqlConsole({ storeId }: { storeId: string }) {
     setSql(sql.slice(0, s) + t + sql.slice(e));
     requestAnimationFrame(() => { el.focus(); el.selectionStart = el.selectionEnd = s + t.length; });
   };
+  const have = useMemo(() => new Set(schema?.flatMap((t) => [t.name, ...t.columns.map((c) => `${t.name}.${c}`)])), [schema]);
+  const examples = Object.entries(SQL_EXAMPLES).filter(([, x]) => schema && x.needs.every((n) => have.has(n)));
   const numeric = res ? res.columns.map((_, i) => res.rows.every((r) => r[i] === null || typeof r[i] === 'number')) : [];
   return (
     <div className="sql-layout">
@@ -508,9 +518,9 @@ function SqlConsole({ storeId }: { storeId: string }) {
       </aside>
       <main style={{ minWidth: 0 }}>
         <div className="toolbar">
-          <select value="" aria-label="Examples" onChange={(e) => { if (e.target.value) { setSql(SQL_EXAMPLES[e.target.value]); run(SQL_EXAMPLES[e.target.value]); } }}>
+          <select value="" aria-label="Examples" onChange={(e) => { const x = SQL_EXAMPLES[e.target.value]; if (x) { setSql(x.sql); run(x.sql); } }}>
             <option value="">Examples…</option>
-            {Object.keys(SQL_EXAMPLES).map((k) => <option key={k} value={k}>{k}</option>)}
+            {examples.map(([k]) => <option key={k} value={k}>{k}</option>)}
           </select>
           <button className="btn primary" type="button" onClick={() => run()}>Run (⌘↵)</button>
           <button className="btn" type="button" disabled={!res} onClick={() => res && downloadCsv('query', res.columns, res.rows)}>Download CSV</button>

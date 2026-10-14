@@ -174,6 +174,32 @@ def test_a_store_without_line_items_keeps_its_dashboard(tmp_path, manager, store
     assert mcp_server.run_report("all", ["jobs"])["totals"] == {"jobs": 5}  # the pooled view goes on without it
 
 
+# --- the site's Reports tab runs on the same report DBs ---------------------------------
+
+@pytest.fixture
+def site(manager, monkeypatch):
+    monkeypatch.setattr(auth, "AUTH_DISABLED", True)
+    return TestClient(server.app)
+
+
+def test_reports_tab_works_for_cloud_stores_with_their_fields(site):
+    cat = site.get("/api/stores/shop/catalog").json()
+    assert list(cat["datasets"]) == ["work_orders"] and "salesperson" not in cat["datasets"]["work_orders"]["dimensions"]
+    assert "yearly_summary" not in {p["id"] for p in cat["presets"]} and cat["limits"]
+    assert cat["data"]["work_orders"] == 5
+    r = site.post("/api/stores/shop/report", json={"dimensions": ["customer_type"], "metrics": ["jobs", "sales"]})
+    assert dict((row[0], row[1:]) for row in r.json()["rows"]) == {"New": [3, 340.0], "Returning": [1, 120.0]}
+    r = site.post("/api/stores/shop/report", json={"dimensions": ["salesperson"], "metrics": ["jobs"]})
+    assert r.status_code == 400 and "cloud stores only have" in r.json()["detail"]
+    assert site.get("/api/stores/shop/values?dataset=work_orders&dim=customer_name").json()[0]["count"] >= 1
+    tables = {t["name"] for t in site.get("/api/stores/shop/schema").json()}
+    assert {"wo_facts", "line_items", "visits"} <= tables
+    assert site.post("/api/stores/shop/sql", json={"sql": "select count(*) from wo_facts"}).json()["rows"] == [[5]]
+    # on-prem keeps everything
+    assert "components" in site.get("/api/stores/mason/catalog").json()["datasets"]
+    assert site.get("/api/stores/shop/insights").status_code == 404  # in-store detail stays on-prem
+
+
 # --- over HTTP, inside the website -------------------------------------------------------
 
 H = {"accept": "application/json, text/event-stream", "content-type": "application/json"}

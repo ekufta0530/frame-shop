@@ -81,8 +81,7 @@ def test_store_dashboard_uses_each_stores_own_today(client):
     assert mason["store"]["data_through"] == "2025-08-30" and mason["current_month"] == "2025-08"
 
 
-def test_report_builder_is_on_prem_only(client):
-    assert client.get("/api/stores/shop/catalog").status_code == 404
+def test_in_store_detail_is_on_prem_only(client):
     assert client.get("/api/stores/shop/insights").status_code == 404
     assert client.get("/api/stores/nope/dashboard").status_code == 404
     assert client.post("/api/stores/mason/sql", json={"sql": "select count(*) from wo_facts"}).json()["rows"] == [[5]]

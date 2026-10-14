@@ -5,7 +5,7 @@
 Pages (client-side routes, all served index.html):
     /                       all-stores overview: stores side by side + the pooled dashboard
     /stores/<id>            one store's dashboard (+ the on-prem section for on-prem stores)
-    /stores/<id>/reports    report builder + SQL console (on-prem stores)
+    /stores/<id>/reports    report builder + SQL console (every store; cloud stores have fewer fields)
     /login
     /privacy, /terms        the public privacy policy and terms (served by the API, not the SPA)
     /mcp/<token>            the MCP server for Claude (webapp/mcp_server.py; its own token, not the login)
@@ -110,10 +110,19 @@ def _store_or_404(snap, store_id: str):
     return sd
 
 
+def _reports_or_404(snap, store_id: str):
+    """The store, if its reports DB is ready: on-prem its lifesaver.sqlite, cloud a rolled-up copy of
+    its warehouse with fewer fields (sd.level says which)."""
+    sd = _store_or_404(snap, store_id)
+    if sd.reports_path is None:
+        raise HTTPException(503, f"{sd.store.name}: report data unavailable ({sd.reports_error})")
+    return sd
+
+
 def _on_prem_or_404(snap, store_id: str):
     sd = _store_or_404(snap, store_id)
     if not sd.store.on_prem:
-        raise HTTPException(404, f"{sd.store.name} is a cloud store: the report builder needs "
+        raise HTTPException(404, f"{sd.store.name} is a cloud store: the in-store detail needs "
                                  "an on-prem store's full database")
     return sd
 
@@ -159,36 +168,37 @@ def store_insights(store_id: str):
     return _cached(("insights", store_id), build)
 
 
-# --- report builder (on-prem stores) ---------------------------------------------
+# --- report builder ------------------------------------------------------------------
 
 @app.get("/api/stores/{store_id}/catalog")
 def catalog(store_id: str):
-    sd = _on_prem_or_404(manager.snapshot(), store_id)
-    with lsdb.using(sd.source_path):
-        return {"datasets": semantic.catalog(), "presets": presets.for_level(semantic.FULL), "data": lsdb.data_info()}
+    sd = _reports_or_404(manager.snapshot(), store_id)
+    with lsdb.using(sd.reports_path):
+        return {"datasets": semantic.catalog(sd.level), "presets": presets.for_level(sd.level),
+                "limits": semantic.LEVEL_NOTES.get(sd.level), "data": lsdb.data_info()}
 
 
 @app.post("/api/stores/{store_id}/report")
 def report(store_id: str, spec: dict):
-    sd = _on_prem_or_404(manager.snapshot(), store_id)
-    with lsdb.using(sd.source_path):
+    sd = _reports_or_404(manager.snapshot(), store_id)
+    with lsdb.using(sd.reports_path):
         try:
-            return semantic.run_report(spec)
+            return semantic.run_report(spec, sd.level)
         except (ValueError, TypeError, AttributeError) as e:  # malformed spec values, e.g. limit="abc"
             raise semantic.SpecError(f"invalid report spec: {e}") from e
 
 
 @app.get("/api/stores/{store_id}/values")
 def values(store_id: str, dataset: str, dim: str, q: str | None = None):
-    sd = _on_prem_or_404(manager.snapshot(), store_id)
-    with lsdb.using(sd.source_path):
-        return semantic.dimension_values(dataset, dim, q)
+    sd = _reports_or_404(manager.snapshot(), store_id)
+    with lsdb.using(sd.reports_path):
+        return semantic.dimension_values(dataset, dim, q, level=sd.level)
 
 
 @app.get("/api/stores/{store_id}/schema")
 def schema(store_id: str):
-    sd = _on_prem_or_404(manager.snapshot(), store_id)
-    with lsdb.using(sd.source_path):
+    sd = _reports_or_404(manager.snapshot(), store_id)
+    with lsdb.using(sd.reports_path):
         return lsdb.schema()
 
 
@@ -198,10 +208,10 @@ class SqlIn(BaseModel):
 
 @app.post("/api/stores/{store_id}/sql")
 def run_sql(store_id: str, body: SqlIn):
-    sd = _on_prem_or_404(manager.snapshot(), store_id)
+    sd = _reports_or_404(manager.snapshot(), store_id)
     # read-only connection with query_only and a time limit: this can't modify anything
     try:
-        with lsdb.using(sd.source_path):
+        with lsdb.using(sd.reports_path):
             cols, rows = lsdb.query(body.sql, max_rows=5001)
     except Exception as e:
         raise HTTPException(400, str(e))
