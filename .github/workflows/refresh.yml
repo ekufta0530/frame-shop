@@ -8,10 +8,10 @@ name: refresh store data
 # Each cloud store has its own lsscloud account (so its own one-session limit): its login is the
 # Secret Manager secret named in stores.toml (default lifesaver-store-<id>), holding
 # {"username": "...", "password": "..."}. Adding a store is a stores.toml entry + that secret;
-# tick "backfill" for its first run. See cloud/DEPLOY.md §7 and §9.
+# tick "backfill" for its first run. See cloud/DEPLOY.md §2.
 #
 # Same WIF identity as publish.yml (gha-deployer). Beyond what deploy already has, it needs
-# objectAdmin on the warehouse bucket and secretAccessor on each store secret (DEPLOY.md §7).
+# objectAdmin on the warehouse bucket and secretAccessor on each store secret (DEPLOY.md §2).
 
 on:
   schedule:

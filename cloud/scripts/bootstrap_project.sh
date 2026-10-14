@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# One-time (and safe to re-run) setup of a GCP project to host everything: the website, both MCP servers,
-# the data buckets and the GitHub Actions deploy identity. Copies the data and secrets from the old project
+# One-time (and safe to re-run) setup of a GCP project to host everything: the website (which is also the
+# MCP server for Claude), the data buckets and the GitHub Actions deploy identity. Copies the data and secrets from the old project
 # when OLD_PROJECT is readable. Nothing in the old project is changed.
 #
 #   PROJECT=frame-shop-511616 cloud/scripts/bootstrap_project.sh
 #   PROJECT=... cloud/scripts/bootstrap_project.sh --skip-copy     # new buckets/identities only
 #
 # Needs: you are an Owner of PROJECT, billing is linked, and (to copy) you can read OLD_PROJECT.
-# Not done here (prints what's left at the end): the OAuth client secrets, the website/MCP deploys,
+# Not done here (prints what's left at the end): the OAuth client secrets, the website deploy,
 # the GitHub repo variables, sharing the Mason Drive folder with the new deploy account.
 set -euo pipefail
 
@@ -19,15 +19,12 @@ DATA_BUCKET="${DATA_BUCKET:-${PROJECT}-lifesaver-data}"
 WAREHOUSE_BUCKET="${WAREHOUSE_BUCKET:-${PROJECT}-kpi-warehouse}"
 OLD_DATA_BUCKET="${OLD_DATA_BUCKET:-${OLD_PROJECT}-lifesaver-data}"
 OLD_WAREHOUSE_BUCKET="${OLD_WAREHOUSE_BUCKET:-lifesaver-kpi-warehouse}"
-# secrets carried over unchanged, so tokens and logins (and the claude.ai connector tokens) stay the same
-COPY_SECRETS=(lifesaver-store-main lifesaver-mcp-token mcp-auth-token lifesaver-username lifesaver-password)
+# secrets carried over unchanged: the cloud stores' lsscloud logins
+COPY_SECRETS=(lifesaver-store-main)
 SKIP_COPY=false; [[ "${1:-}" == "--skip-copy" ]] && SKIP_COPY=true
 
 DEPLOYER="gha-deployer@${PROJECT}.iam.gserviceaccount.com"
 SITE_SA="frame-shop@${PROJECT}.iam.gserviceaccount.com"            # website runtime
-MCP_SA="lifesaver-mcp@${PROJECT}.iam.gserviceaccount.com"          # cloud MCP server runtime
-REPORTS_SA="lifesaver-reports@${PROJECT}.iam.gserviceaccount.com"  # Mason SQL MCP runtime
-BUILD_SA="lifesaver-builder@${PROJECT}.iam.gserviceaccount.com"    # Cloud Build, for --source deploys
 
 say() { printf '\n== %s\n' "$*"; }
 retry() { for i in 1 2 3 4 5 6 7 8; do "$@" && return 0; echo "  retrying in 10s..." >&2; sleep 10; done; return 1; }
@@ -40,19 +37,14 @@ PROJNUM=$(G projects describe "$PROJECT" --format='value(projectNumber)')
 
 say "APIs"
 G services enable run.googleapis.com secretmanager.googleapis.com storage.googleapis.com \
-  iam.googleapis.com iamcredentials.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com drive.googleapis.com
+  iam.googleapis.com iamcredentials.googleapis.com drive.googleapis.com
 
 say "Service accounts"
-for spec in "gha-deployer:GitHub Actions deployer" "frame-shop:Frame Shop website runtime" \
-            "lifesaver-mcp:Cloud MCP server runtime" "lifesaver-reports:Mason SQL MCP runtime" \
-            "lifesaver-builder:Cloud Build for source deploys"; do
+for spec in "gha-deployer:GitHub Actions deployer" "frame-shop:Frame Shop website runtime"; do
   id="${spec%%:*}"
   G iam service-accounts describe "${id}@${PROJECT}.iam.gserviceaccount.com" >/dev/null 2>&1 || \
     G iam service-accounts create "$id" --display-name "${spec#*:}"
 done
-retry G projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$BUILD_SA" \
-  --role roles/cloudbuild.builds.builder --condition=None >/dev/null
 
 say "Buckets"
 make_bucket() {
@@ -96,19 +88,14 @@ bucket_role "$DATA_BUCKET" "$DEPLOYER" roles/storage.objectAdmin        # mason-
 bucket_role "$WAREHOUSE_BUCKET" "$DEPLOYER" roles/storage.objectAdmin   # refresh.yml writes warehouses
 bucket_role "$DATA_BUCKET" "$SITE_SA" roles/storage.objectViewer
 bucket_role "$WAREHOUSE_BUCKET" "$SITE_SA" roles/storage.objectViewer
-bucket_role "$DATA_BUCKET" "$REPORTS_SA" roles/storage.objectViewer
 
-for s in lifesaver-username lifesaver-password mcp-auth-token; do secret_role "$s" "$MCP_SA"; done
-secret_role lifesaver-mcp-token "$REPORTS_SA"
 for s in $(G secrets list --format='value(name)' --filter='name~lifesaver-store-'); do secret_role "$s" "$DEPLOYER"; done
 
-# the deploy account rolls Cloud Run services onto new images and acts as their runtime accounts
+# the deploy account rolls the website onto new images and acts as its runtime account
 retry G projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$DEPLOYER" \
   --role roles/run.admin --condition=None >/dev/null
-for sa in "$SITE_SA" "$MCP_SA" "$REPORTS_SA"; do
-  retry G iam service-accounts add-iam-policy-binding "$sa" --member "serviceAccount:$DEPLOYER" \
-    --role roles/iam.serviceAccountUser >/dev/null
-done
+retry G iam service-accounts add-iam-policy-binding "$SITE_SA" --member "serviceAccount:$DEPLOYER" \
+  --role roles/iam.serviceAccountUser >/dev/null
 
 say "GitHub Actions identity (Workload Identity Federation, locked to $REPO)"
 G iam workload-identity-pools describe github --location=global >/dev/null 2>&1 || \
@@ -138,14 +125,9 @@ cat <<EOF
 
 3. Mason Drive folder: share it with $DEPLOYER as Viewer (the old deploy account's share doesn't carry over).
 
-4. Deploy:
-     PROJECT=$PROJECT webapp/deploy.sh                          # the website  -> https://frame-shop-${PROJNUM}.${REGION}.run.app
-     PROJECT=$PROJECT mason_reports/deploy/deploy_mcp.sh        # Mason SQL MCP (Claude connector)
-     gcloud run deploy lifesaver-mcp --project $PROJECT --region us-central1 --allow-unauthenticated \\
-       --image ghcr.io/ekufta0530/lifesaver-mcp:latest --service-account $MCP_SA --port 8080 \\
-       --max-instances 1 --min-instances 1 --concurrency 8 --timeout 300 --cpu 1 --memory 512Mi \\
-       --set-secrets LIFESAVER_USERNAME=lifesaver-username:latest,LIFESAVER_PASSWORD=lifesaver-password:latest,MCP_AUTH_TOKEN=mcp-auth-token:latest
+4. Deploy the website (also creates the MCP token):
+     PROJECT=$PROJECT webapp/deploy.sh          # -> https://frame-shop-${PROJNUM}.${REGION}.run.app
 
 5. People: webapp/users.sh add someone@gmail.com --name "Name"     (one per person)
-6. Re-point the claude.ai connectors at the new service URLs (the tokens are unchanged).
+6. Claude connector: PROJECT=$PROJECT webapp/mcp_url.sh prints its URL (a new project means a new token).
 EOF

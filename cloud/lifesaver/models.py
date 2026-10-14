@@ -1,6 +1,4 @@
-"""Response schemas. These become the OpenAPI schema, which Phase 2's MCP tool
-schema mirrors almost 1:1.
-"""
+"""Row and response schemas: the parsed report rows, and the local API's OpenAPI schema."""
 
 from __future__ import annotations
 

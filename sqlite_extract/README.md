@@ -6,9 +6,8 @@ uploads a copy of their LifeSaver folder, and this package turns it into:
 
 - **`lifesaver.sqlite`** in `gs://frame-shop-511616-lifesaver-data/`: clean tables and
   views over the POS data. This is the live dataset for the website
-  ([`webapp/`](../webapp/): the Mason dashboard, in-store detail and report builder)
-  and Mason's SQL MCP server ([`mason_reports/`](../mason_reports/)). Both re-read it
-  within 10 minutes of a publish.
+  ([`webapp/`](../webapp/): the Mason dashboard, in-store detail, report builder and the
+  MCP server for Claude). It re-reads it within 10 minutes of a publish.
 - **`mason.db`**: the same `core` KPI tables the cloud stores have (`visits`,
   `customer_lifecycle`, `kpi_monthly`), derived from the sqlite by the website
   itself whenever a new copy appears (a second or so). It is never stored.
@@ -69,7 +68,7 @@ Exit status and what the workflow run shows:
 ## Operating it
 
 Setup (Drive API, bucket IAM, sharing the folder, the `MASON_DRIVE_FOLDER_ID`
-repo variable) is in [`cloud/DEPLOY.md`](../cloud/DEPLOY.md) §8.
+repo variable) is in [`cloud/DEPLOY.md`](../cloud/DEPLOY.md) §3.
 
 **What the owner does:** drag the LifeSaver folder, or a zip of it, into the
 shared Drive folder. Old uploads can stay; the newest one wins. Don't keep
@@ -103,7 +102,7 @@ within 10 minutes. The next upload
 the owner makes is still compared against whatever is live.
 
 **Run locally** (needs permission to impersonate `gha-deployer`): see the end
-of DEPLOY.md §8. Or skip Drive and build from a file you have:
+of DEPLOY.md §3. Or skip Drive and build from a file you have:
 
 ```bash
 .venv/bin/python -m sqlite_extract.extract ~/Downloads/LifeSaver.zip lifesaver.sqlite

@@ -7,7 +7,7 @@ name: mason data from drive
 #
 # Same WIF identity as publish.yml (gha-deployer). One-time setup -- Drive API,
 # bucket write access, sharing the folder, the MASON_DRIVE_FOLDER_ID repo
-# variable -- is in cloud/DEPLOY.md §8.
+# variable -- is in cloud/DEPLOY.md §3.
 
 on:
   schedule:
@@ -26,7 +26,7 @@ env:
 
 jobs:
   ingest:
-    # skipped (not failed) until DEPLOY.md §8 setup sets the folder variable
+    # skipped (not failed) until DEPLOY.md §3 setup sets the folder variable
     if: vars.MASON_DRIVE_FOLDER_ID != ''
     runs-on: ubuntu-latest
     permissions:

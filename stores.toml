@@ -13,7 +13,7 @@
 #        echo -n '{"username": "...", "password": "..."}' | \
 #          gcloud secrets create lifesaver-store-<id> --project=frame-shop-511616 --data-file=-
 #      then run the "refresh store data" workflow once with backfill ticked
-#      (cloud/DEPLOY.md §9 has the details).
+#      (cloud/DEPLOY.md §2 has the details).
 #
 # Optional per-store keys (all have sensible defaults):
 #   data        -- where the store's data lives (gs:// or a local path). Defaults:

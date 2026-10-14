@@ -5,13 +5,12 @@ Software: one website for every store, fed by two kinds of data source.
 
 | Dir | What |
 |---|---|
-| [`webapp/`](webapp/) | **The website** (React + FastAPI, Cloud Run): all-stores overview, a dashboard per store, and for on-prem stores an in-store detail section and a report builder / SQL console. [README](webapp/README.md) |
+| [`webapp/`](webapp/) | **The website** (React + FastAPI, Cloud Run): all-stores overview, a dashboard per store, and for on-prem stores an in-store detail section and a report builder / SQL console. Also **the MCP server for Claude** over every store (`/mcp/<token>`). [README](webapp/README.md) |
 | [`stores.toml`](stores.toml) | Every store: id, name, tier (`cloud` / `on-prem`), and where its data lives. Adding a cloud store is an entry here + a secret |
-| [`cloud/`](cloud/) | **Cloud tier.** Everything that talks to Lifesaver Cloud (`lsscloud.com`): the report scraper (`lifesaver/`), the remote MCP server (`mcp_server/`, Cloud Run), the warehouse ingest that accumulates report pulls (`warehouse/`), one-off pull scripts |
+| [`cloud/`](cloud/) | **Cloud tier.** Everything that talks to Lifesaver Cloud (`lsscloud.com`): the report scraper (`lifesaver/`), the warehouse ingest that accumulates report pulls (`warehouse/`), one-off pull scripts |
 | [`sqlite_extract/`](sqlite_extract/) | **On-prem tier.** Turns a store's own LifeSaver data (uploaded to Google Drive by the owner) into `lifesaver.sqlite`, then into KPI tables -- no scraping |
 | [`core/`](core/) | Store-independent: visits, the five retention KPIs, the SQLite tables every store writes, the store registry (`stores.py`) and the pooled all-stores warehouse (`aggregate.py`) |
-| [`lsreports/`](lsreports/) | The report builder's query layer over an on-prem store's `lifesaver.sqlite`; shared by the website and `mason_reports/` |
-| [`mason_reports/`](mason_reports/) | The claude.ai SQL connector for an on-prem store (the web report builder it used to hold is now part of the website) |
+| [`lsreports/`](lsreports/) | The query layer behind the Reports tab and the MCP tools: named dimensions/metrics over each store's data, plus the cloud and pooled report DBs (`build.py`) |
 | `tests/` | Offline suite, split as `tests/{cloud,core,sqlite_extract,webapp}` |
 
 Dependencies only point inward: `cloud` and `sqlite_extract` import `core`;
@@ -37,9 +36,7 @@ lsscloud.com ── Work Order List report          owner drags LifeSaver folder
                        webapp (Cloud Run "frame-shop")
                          /              all stores: side by side + pooled
                          /stores/<id>   one store (+ in-store detail and Reports if on-prem)
-
-cloud.mcp_server (Cloud Run "lifesaver-mcp", us-central1)   live per-call report pulls for claude.ai
-mason_reports/mcp_server (Cloud Run "lifesaver-mcp", us-west1)   SQL connector for claude.ai
+                         /mcp/<token>   the MCP server for Claude: every store, or all pooled
 ```
 
 GitHub Actions drive everything; all authenticate to GCP as `gha-deployer`
@@ -47,9 +44,9 @@ via Workload Identity Federation (no keys):
 
 | Workflow | When | Does | Setup |
 |---|---|---|---|
-| [`publish.yml`](.github/workflows/publish.yml) | push to `main` | test (incl. frontend build) → images to GHCR → redeploy the cloud MCP server and the website | [DEPLOY.md](cloud/DEPLOY.md) §1–6, [webapp/README.md](webapp/README.md) |
-| [`refresh.yml`](.github/workflows/refresh.yml) | daily 09:17 UTC | every cloud store: pull new report rows → recompute KPIs → save its `warehouse.db` | DEPLOY.md §7 |
-| [`mason-ingest.yml`](.github/workflows/mason-ingest.yml) | every 6 h (:41) | on-prem store: newest Drive upload → validated `lifesaver.sqlite` | DEPLOY.md §8 |
+| [`publish.yml`](.github/workflows/publish.yml) | push to `main` | test (incl. frontend build) → website image to GHCR → redeploy the website (and with it the MCP server) | [DEPLOY.md](cloud/DEPLOY.md) §1, [webapp/README.md](webapp/README.md) |
+| [`refresh.yml`](.github/workflows/refresh.yml) | daily 09:17 UTC | every cloud store: pull new report rows → recompute KPIs → save its `warehouse.db` | DEPLOY.md §2 |
+| [`mason-ingest.yml`](.github/workflows/mason-ingest.yml) | every 6 h (:41) | on-prem store: newest Drive upload → validated `lifesaver.sqlite` | DEPLOY.md §3 |
 
 GCS buckets (project `frame-shop-511616`):
 
@@ -67,23 +64,21 @@ GCS buckets (project `frame-shop-511616`):
 | `cloud/lifesaver/reports.py` | per-report config (page path + date-field control IDs); WorkOrderList only |
 | `cloud/lifesaver/models.py` | pydantic row/response schemas |
 | `cloud/lifesaver/api.py` | FastAPI app (local dev; not deployed) |
-| `cloud/mcp_server/server.py` | MCP server: one tool, `get_work_order_list_report(start_date, end_date)`; stdio + streamable-http transports, bearer-token auth |
 | `cloud/warehouse/` | main store's ingest: raw landing → `line_items` → name-matched customers, then `core` for visits/KPIs. CLI: `python -m cloud.warehouse.job`. See [its README](cloud/warehouse/README.md) |
 | `cloud/lifesaver_report_pull.py` | original standalone reference script (still runnable); also has `pull_invoice()` (single invoice as PDF) and `pull_customer_export()` (full customer list as CSV) |
 | `cloud/scripts/pull_invoices.py` | bulk-pull invoices as PDFs (`invoice_<id>.pdf`), from a WorkOrderList CSV or a plain list of invoice numbers |
 | `cloud/scripts/pull_customers.py` | pull the full customer list as CSV (every customer, not scoped to any date range) |
 | `cloud/scripts/inspect/` | one-off recon of the other SSRS report pages (parked — see its README); also has `verify_invoice_endpoint.py` and `verify_customer_export.py`, which confirmed those two flows live before they were promoted into `lifesaver_report_pull.py` |
-| `cloud/Dockerfile`, `cloud/DEPLOY.md` | one-image build (context = repo root) + Cloud Run deploy for the remote (claude.ai) MCP setup |
+| `cloud/DEPLOY.md` | CI/CD, the GitHub Actions identity, and the two data workflows' setup |
 | `sqlite_extract/drive.py` | finds the newest LifeSaver upload (zip or plain folder) in the shared Drive folder and downloads only what's needed |
 | `sqlite_extract/extract.py` | LifeSaver `.dbf` tables (folder or zip) → `lifesaver.sqlite` (`python -m sqlite_extract.extract <dir\|zip> lifesaver.sqlite`) |
 | `sqlite_extract/ingest.py` / `ingest.sh` | Drive → build → sanity-check against the live copy → publish to GCS; what `mason-ingest.yml` runs |
-| `mason_reports/` | Mason's SQL MCP server for claude.ai (separate image, deployed by hand to us-west1). See [its README](mason_reports/README.md) |
 | `sqlite_extract/importer.py` | `lifesaver.sqlite` → `core` warehouse (`python -m sqlite_extract.importer lifesaver.sqlite mason.db`). See [its README](sqlite_extract/README.md) |
 | `core/` | `visits.py`, `kpis.py`, `months.py` (pure functions), `store.py` (the shared SQLite tables), `models.py`, `config.py` |
-| `webapp/` | the website: `server.py` (API), `data.py` (per-store data + pooled warehouse), `views.py`, `insights.py`, `frontend/` (React). See its [README](webapp/README.md) |
+| `webapp/` | the website: `server.py` (API), `data.py` (per-store data + pooled warehouse), `views.py`, `insights.py`, `mcp_server.py` (the MCP server for Claude), `frontend/` (React). See its [README](webapp/README.md) |
 | `stores.toml`, `core/stores.py` | the store registry |
-| `lsreports/` | the on-prem report builder's query layer |
-| `.github/workflows/publish.yml` | on push to `main`: test → build+push images to GHCR → deploy the MCP server and the website to Cloud Run |
+| `lsreports/` | the report query layer (`semantic.py`, `presets.py`) and the cloud/pooled report DBs (`build.py`) |
+| `.github/workflows/publish.yml` | on push to `main`: test → build+push the website image to GHCR → deploy it to Cloud Run |
 | `.github/workflows/refresh.yml` | daily: every cloud store → sync → recompute KPIs → save its warehouse |
 | `.github/workflows/mason-ingest.yml` | every 6 h: Mason Drive upload → validated `lifesaver.sqlite` |
 
@@ -95,7 +90,7 @@ python3 -m venv .venv
 cp .env.example .env   # fill in LIFESAVER_USERNAME / LIFESAVER_PASSWORD
 ```
 
-(`requirements.txt` alone is the container runtime set.)
+(The website's container installs `webapp/requirements.txt`.)
 
 ## Run the API
 
@@ -107,31 +102,10 @@ cp .env.example .env   # fill in LIFESAVER_USERNAME / LIFESAVER_PASSWORD
 - add `&format=csv` for the raw export
 - interactive docs at `http://localhost:8000/docs`
 
-## Run the MCP server (Phase 2)
+## Claude connector (MCP)
 
-Does **not** need the Phase 1 API — it runs the scrape in-process. It just needs
-`LIFESAVER_USERNAME` / `LIFESAVER_PASSWORD` (from `.env` or the environment).
-
-**Locally (stdio).** `.mcp.json` is already wired for Claude Code — approve the
-`lifesaver` server. Or by hand:
-
-```bash
-.venv/bin/python -m cloud.mcp_server.server
-```
-
-**Remote (streamable-http)** — for a claude.ai custom connector:
-
-```bash
-MCP_TRANSPORT=streamable-http MCP_AUTH_TOKEN=$(openssl rand -hex 32) \
-  .venv/bin/python -m cloud.mcp_server.server
-# MCP at http://localhost:8080/mcp  (needs  Authorization: Bearer <token>)
-# health at http://localhost:8080/health
-```
-
-Deploying this to Cloud Run + GHCR: **[cloud/DEPLOY.md](cloud/DEPLOY.md)**.
-
-One tool: `get_work_order_list_report(start_date, end_date)` (ISO dates) → parsed
-work-order rows.
+The website serves it at `/mcp/<token>`: every store, or all of them pooled, from the same data the
+site shows. Tools, tiers and the connector URL: [webapp/README.md](webapp/README.md#claude-connector-mcp).
 
 ## Retention warehouse + website (Phase 3)
 

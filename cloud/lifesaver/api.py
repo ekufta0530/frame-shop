@@ -1,7 +1,6 @@
 """FastAPI service (Phase 1).
 
-The only component that knows lsscloud.com exists. Phase 2 (MCP) calls this
-over HTTP.
+A local-dev HTTP front for the report client (not deployed).
 
 Run:  uvicorn cloud.lifesaver.api:app --port 8000
 Docs: http://localhost:8000/docs

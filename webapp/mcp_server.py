@@ -135,12 +135,6 @@ def _target(store: str) -> Target:
                   sd.data_through, ViewConfig.of(sd.store))
 
 
-def _latest_order(t: Target):
-    with db.using(t.reports):
-        _, rows = db.query('SELECT max(order_date), count(*) FROM wo_facts')
-    return {'latest_order_date': rows[0][0], 'work_orders': rows[0][1]}
-
-
 # --- tools ----------------------------------------------------------------------------
 
 @tool
@@ -172,7 +166,9 @@ def list_stores() -> dict:
 def get_catalog(store: StoreId) -> dict:
     """The datasets, dimensions and metrics this store's data has, its preset reports, and how current it is."""
     t = _target(store)
-    return {'store': {'id': t.id, 'name': t.name, 'data_through': t.through.isoformat(), **_latest_order(t)},
+    with db.using(t.reports):
+        info = db.data_info()
+    return {'store': {'id': t.id, 'name': t.name, 'data_through': t.through.isoformat(), **info},
             'limits': semantic.LEVEL_NOTES.get(t.level),
             'datasets': semantic.catalog(t.level),
             'presets': [{'id': p['id'], 'title': p['title'], 'description': p['description']}

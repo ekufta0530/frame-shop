@@ -59,7 +59,7 @@ of `stores.toml`. `python -m core.stores` validates the file; CI runs the same c
 (cd webapp/frontend && npm install && npm run build)
 
 # point each store at a local copy of its data (warehouse.db / lifesaver.sqlite), skip the login
-STORE_MAIN_DATA=warehouse.db STORE_MASON_DATA=mason_reports/lifesaver.sqlite AUTH_DISABLED=1 \
+STORE_MAIN_DATA=warehouse.db STORE_MASON_DATA=lifesaver.sqlite AUTH_DISABLED=1 \
   .venv/bin/uvicorn webapp.server:app --port 8765          # http://localhost:8765
 
 # frontend with hot reload (proxies /api to the server above)
@@ -78,7 +78,7 @@ CI does it: every push to `main` builds `ghcr.io/ekufta0530/lifesaver-mcp-site`,
 
 ```bash
 # 1. let the first CI run build the image, then make its package public (GitHub → Packages →
-#    lifesaver-mcp-site → Package settings), like the MCP image
+#    lifesaver-mcp-site → Package settings)
 # 2. Google sign-in client: in the project's Console (APIs & Services -> Credentials) create an OAuth
 #    "Web application" client with redirect URIs
 #      http://localhost:8765/auth/callback
