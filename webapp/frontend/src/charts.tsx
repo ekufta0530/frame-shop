@@ -151,11 +151,14 @@ export function Spark({ points, color }: { points: { v: number }[]; color: strin
 export interface BarSeries { key: string; label: string; color: string; values: Record<string, number> }
 
 export function MonthlyBars({
-  months, series, partial, muteOutside, avg, money = true, height = 230, legend,
+  months, series, partial, muteOutside, avg, money = true, height = 230, legend, yMax, animate = false,
 }: {
   months: string[]; series: BarSeries[]; partial?: string; muteOutside?: string[]; avg?: boolean;
   money?: boolean; height?: number; legend?: boolean;
+  /** pin the top of the y axis (it otherwise fits the data); animate: ease bars to new values */
+  yMax?: number; animate?: boolean;
 }) {
+  const anim = { isAnimationActive: animate, animationDuration: 450, animationEasing: 'ease-out' as const };
   const c = useColors();
   const data = useMemo(() => months.map((m, i) => {
     const row: Record<string, number | string | null> = { m };
@@ -183,7 +186,7 @@ export function MonthlyBars({
         <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap="22%">
           <CartesianGrid stroke={c.grid} vertical={false} />
           <XAxis dataKey="m" ticks={ticks} tickFormatter={fmt} {...axisProps(c)} minTickGap={8} />
-          <YAxis tickFormatter={vf} width={48} {...axisProps(c)} axisLine={false} tickCount={4} />
+          <YAxis tickFormatter={vf} width={48} {...axisProps(c)} axisLine={false} tickCount={4} domain={yMax ? [0, yMax] : undefined} />
           <Tooltip
             cursor={{ fill: c.grid, fillOpacity: 0.5 }}
             content={({ active, payload, label }) => {
@@ -197,14 +200,14 @@ export function MonthlyBars({
           />
           {series.map((s, si) => (
             <Bar key={s.key} dataKey={s.key} stackId={stacked ? 'a' : undefined} fill={s.color} maxBarSize={24}
-              radius={si === series.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} isAnimationActive={false}
+              radius={si === series.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} {...anim}
               stroke={stacked ? c.surface : undefined} strokeWidth={stacked ? 1 : 0}>
               {months.map((m) => (
                 <Cell key={m} fillOpacity={m === partial ? 0.45 : muteOutside && muteOutside.length && !muteOutside.includes(m) ? 0.35 : 1} />
               ))}
             </Bar>
           ))}
-          {avg && <Line dataKey="__avg" stroke={c.ink2} strokeWidth={1.5} strokeDasharray="5 3" dot={false} isAnimationActive={false} connectNulls />}
+          {avg && <Line dataKey="__avg" stroke={c.ink2} strokeWidth={1.5} strokeDasharray="5 3" dot={false} {...anim} connectNulls />}
         </ComposedChart>
       </ResponsiveContainer>
     </>

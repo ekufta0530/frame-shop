@@ -56,7 +56,7 @@ export default function StoreDashboard({ d: raw, stores }: { d: Dashboard; store
       <BusinessTiles d={d} p={p} />
       <div className="grid" style={{ marginTop: 12 }}>
         <YoYTable d={d} />
-        <RevenueChart d={d} p={p} stores={stores} />
+        <RevenueChart d={d} raw={raw} p={p} stores={stores} />
       </div>
 
       <div className="section-label">Customer retention</div>
@@ -135,16 +135,20 @@ function BusinessTiles({ d, p }: { d: Dashboard; p: Period }) {
 
 // ---- monthly revenue ---------------------------------------------------------------------
 
-function RevenueChart({ d, p, stores }: { d: Dashboard; p: Period; stores: StoreInfo[] }) {
+function RevenueChart({ d, raw, p, stores }: { d: Dashboard; raw: Dashboard; p: Period; stores: StoreInfo[] }) {
   const c = useColors();
   const B = d.business;
   const all = monthRange(d.store.chart_from, d.current_month);
   const long = all.length > 30;
   const [span, setSpan] = useState<'2y' | '5y' | 'all'>('2y');
   const months = !long || span === 'all' ? all : all.slice(-(span === '2y' ? 25 : 61));
-  const series: BarSeries[] = B.by_store
-    ? stores.filter((s) => B.by_store![s.id]).map((s) => ({ key: s.id, label: s.name, color: storeColor(c, s.slot), values: B.by_store![s.id] }))
-    : [{ key: 'rev', label: 'Revenue', color: c.accent, values: Object.fromEntries(Object.entries(B.monthly).map(([m, x]) => [m, x.rev])) }];
+  const seriesOf = (b: Dashboard['business']): BarSeries[] => b.by_store
+    ? stores.filter((s) => b.by_store![s.id]).map((s) => ({ key: s.id, label: s.name, color: storeColor(c, s.slot), values: b.by_store![s.id] }))
+    : [{ key: 'rev', label: 'Revenue', color: c.accent, values: Object.fromEntries(Object.entries(b.monthly).map(([m, x]) => [m, x.rev])) }];
+  const series = seriesOf(B);
+  // scale the y axis to the data with outliers left in, so excluding them drops the bar instead of rescaling the chart
+  const rawSeries = seriesOf(raw.business);
+  const yMax = Math.max(0, ...months.map((m) => rawSeries.reduce((a, s) => a + (s.values[m] ?? 0), 0)));
   return (
     <Card title="Monthly revenue" wide
       blurb={<>Pre-tax, after discounts, voids removed. The dashed line is the 3-month average; the faded bar is the open month{B.by_store ? '; stacked by store' : ''}.</>}
@@ -155,7 +159,7 @@ function RevenueChart({ d, p, stores }: { d: Dashboard; p: Period; stores: Store
           ))}
         </div>
       )}>
-      <MonthlyBars months={months} series={series} partial={B.partial_month} avg legend
+      <MonthlyBars months={months} series={series} partial={B.partial_month} avg legend yMax={yMax} animate
         muteOutside={p.kind === 'quarter' ? periodMonths(p, d.current_month) : undefined} />
     </Card>
   );
