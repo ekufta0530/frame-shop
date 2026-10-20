@@ -232,7 +232,7 @@ function kpiPoints(d: Dashboard, meta: KpiMeta, asOf: string) {
 
 function RetentionTiles({ d, p, openWord }: { d: Dashboard; p: Period; openWord: string }) {
   const c = useColors();
-  const cmp = p.kind === 'quarter' ? addM(qMonths(p.year, p.q!)[0], -1) : addM(p.asOf, -6);
+  const cmp = addM(p.asOf, -12);
   return (
     <div className="tiles">
       {d.meta.map((meta) => {
