@@ -35,7 +35,7 @@ from core.store import DATA_THROUGH
 from core.stores import Store, load_stores
 from lsreports import semantic
 from lsreports.build import build_cloud_reports, build_pooled_reports
-from sqlite_extract.extract import refresh_views
+from sqlite_extract.views import refresh_views
 from sqlite_extract.importer import import_store
 
 log = logging.getLogger(__name__)

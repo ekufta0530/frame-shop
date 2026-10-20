@@ -14,7 +14,7 @@ COPY webapp/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY stores.toml ./
 COPY core/ core/
-COPY sqlite_extract/__init__.py sqlite_extract/importer.py sqlite_extract/
+COPY sqlite_extract/__init__.py sqlite_extract/importer.py sqlite_extract/views.py sqlite_extract/
 COPY lsreports/ lsreports/
 COPY webapp/*.py webapp/
 COPY --from=frontend /fe/dist webapp/frontend/dist

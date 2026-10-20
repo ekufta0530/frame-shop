@@ -17,7 +17,8 @@ import pytest
 from sqlite_extract import drive as drive_mod
 from sqlite_extract import ingest
 from sqlite_extract.drive import Drive, Upload, find_uploads
-from sqlite_extract.extract import NEEDED, SourceError, extract, find_needed, refresh_views, unpack_needed
+from sqlite_extract.extract import NEEDED, SourceError, extract, find_needed, unpack_needed
+from sqlite_extract.views import refresh_views
 
 # ---- a minimal dBase/FoxPro writer --------------------------------------------
 
