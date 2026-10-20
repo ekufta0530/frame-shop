@@ -6,6 +6,7 @@
     python -m cloud.warehouse.job resolve                   # re-run identity resolution
     python -m cloud.warehouse.job rebuild                   # rebuild visits + lifecycle
     python -m cloud.warehouse.job snapshot --all            # (re)compute every KPI month
+    python -m cloud.warehouse.job snapshot --all --refreeze # ...closed months too (data corrected)
     python -m cloud.warehouse.job kpis --metric first_to_second_rate
     python -m cloud.warehouse.job review                    # aliases flagged for a human
 
@@ -103,7 +104,7 @@ def cmd_rebuild(args, wh, settings) -> int:
 def cmd_snapshot(args, wh, settings) -> int:
     today = date.today()
     if args.all:
-        written = pipeline.snapshot_history(wh, settings, today=today)
+        written = pipeline.snapshot_history(wh, settings, today=today, refreeze=args.refreeze)
         print(f"snapshot: {written} KPI rows written/updated")
     else:
         month = args.month or month_start(today)
@@ -148,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
     sn = sub.add_parser("snapshot", help="(re)compute KPI snapshots")
     sn.add_argument("--month", type=_parse_month, metavar="YYYY-MM")
     sn.add_argument("--all", action="store_true", help="every month with data")
+    sn.add_argument("--refreeze", action="store_true",
+                    help="with --all: rewrite closed (frozen) months too, after correcting old data")
     sn.set_defaults(func=cmd_snapshot)
 
     kp = sub.add_parser("kpis", help="print stored KPI series")

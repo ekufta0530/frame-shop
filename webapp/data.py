@@ -35,6 +35,7 @@ from core.store import DATA_THROUGH
 from core.stores import Store, load_stores
 from lsreports import semantic
 from lsreports.build import build_cloud_reports, build_pooled_reports
+from sqlite_extract.extract import refresh_views
 from sqlite_extract.importer import import_store
 
 log = logging.getLogger(__name__)
@@ -214,6 +215,8 @@ class DataManager:
             return before
         sd = StoreData(store=store, generation=generation, source_path=path)
         if store.on_prem:
+            if path.parent == self._cache:  # our own download, never the owner's local file
+                refresh_views(path)
             wh = self._cache / f"{_safe(store.id)}-{_safe(generation)}.warehouse.db"
             if not wh.exists():
                 import_store(path, wh)
@@ -221,10 +224,12 @@ class DataManager:
             sd.reports_path = path
         else:
             sd.warehouse_path = path
-            rp = self._cache / f"{_safe(store.id)}-{_safe(generation)}.reports.db"
+            # the exclusions are in the name, so changing them in stores.toml rebuilds the copy
+            excl = "-x" + "_".join(map(str, store.exclude_invoices)) if store.exclude_invoices else ""
+            rp = self._cache / f"{_safe(store.id)}-{_safe(generation)}{excl}.reports.db"
             try:
                 if not rp.exists():
-                    build_cloud_reports(path, rp)
+                    build_cloud_reports(path, rp, exclude_invoices=store.exclude_invoices)
                 sd.reports_path = rp
             except Exception as e:
                 log.exception("store %s: reports DB failed", store.id)

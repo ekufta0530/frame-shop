@@ -188,7 +188,9 @@ class Warehouse:
 
     # --- KPI snapshots -------------------------------------------------
 
-    def upsert_kpi_snapshots(self, snapshots: Sequence[KpiSnapshot]) -> int:
+    def upsert_kpi_snapshots(self, snapshots: Sequence[KpiSnapshot], *, refreeze: bool = False) -> int:
+        """Write snapshots, skipping months already frozen -- unless ``refreeze``, for a one-off
+        correction of the data under them (e.g. a test order found in an old month)."""
         now = _now()
         written = 0
         c = self._conn
@@ -198,7 +200,7 @@ class Warehouse:
                 "WHERE metric = ? AND month = ? AND calc_version = ?",
                 (s.metric, s.month.isoformat(), s.calc_version),
             ).fetchone()
-            if frozen is not None and frozen["is_final"]:
+            if frozen is not None and frozen["is_final"] and not refreeze:
                 continue
             c.execute(
                 "INSERT OR REPLACE INTO kpi_monthly (metric, month, calc_version, value, "

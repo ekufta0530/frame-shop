@@ -324,11 +324,13 @@ class CloudWarehouse(Warehouse):
 
     # --- visits ---------------------------------------------------------
 
-    def lines_for_visits(self) -> Iterator[LineForVisit]:
+    def lines_for_visits(self, exclude_invoices: frozenset[int] = frozenset()) -> Iterator[LineForVisit]:
         for r in self._conn.execute(
-            "SELECT customer_id, work_order_id, order_date, retail, discount, current_status "
-            "FROM line_items WHERE customer_id IS NOT NULL"
+            "SELECT customer_id, work_order_id, invoice_number, order_date, retail, discount, "
+            "current_status FROM line_items WHERE customer_id IS NOT NULL"
         ):
+            if r["invoice_number"] in exclude_invoices:
+                continue
             yield LineForVisit(
                 customer_id=r["customer_id"],
                 work_order_id=r["work_order_id"],

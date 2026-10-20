@@ -26,6 +26,10 @@ on:
         description: "Pull the store's full history first (new stores, or to repair a gap)"
         type: boolean
         default: false
+      refreeze:
+        description: "Recompute closed months too (after excluding old orders, e.g. test orders)"
+        type: boolean
+        default: false
 
 env:
   PROJECT: frame-shop-511616
@@ -91,6 +95,7 @@ jobs:
             echo "LIFESAVER_PASSWORD=$pass"
             echo "WAREHOUSE_DB_PATH=$PWD/warehouse.db"
             echo "WAREHOUSE_RAW_DIR=$PWD/warehouse_raw"
+            echo "WAREHOUSE_EXCLUDED_INVOICES=${{ matrix.exclude_invoices }}"
           } >> "$GITHUB_ENV"
 
       - name: Pull ${{ matrix.name }}'s warehouse from GCS
@@ -116,6 +121,10 @@ jobs:
         run: |
           python -m cloud.warehouse.job sync
           python -m cloud.warehouse.job status
+
+      - name: Recompute closed months
+        if: inputs.refreeze
+        run: python -m cloud.warehouse.job snapshot --all --refreeze
 
       - name: Push the warehouse back to GCS
         run: |

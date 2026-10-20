@@ -62,15 +62,22 @@ def compute_kpis(
     r_next = add_months(r0, 1)
     is_final = today >= r_next  # the reporting month has fully closed
 
-    ttm_lo = add_months(r0, -11)  # 12 whole months: the report month + 11 before
+    if is_final:
+        ttm_lo, ttm_hi = add_months(r0, -11), r_next  # 12 whole months: the report month + 11 before
+    else:
+        # An open month ends at today: 12 months back from there. Whole months would already have
+        # dropped last year's month while holding only part of this one, so the trailing counts
+        # sag every open month (705 active vs 751 the month before, on 10 days of October).
+        ttm_hi = today + timedelta(days=1)
+        ttm_lo = add_months(ttm_hi, -12)
 
     dates_by_customer = _visit_dates_by_customer(visits)
 
     return [
         _first_to_second(dates_by_customer, r0, cohort_window_months, is_final),
-        _repeat_revenue_share(visits, ttm_lo, r_next, r0, is_final),
+        _repeat_revenue_share(visits, ttm_lo, ttm_hi, r0, is_final),
         _median_days_to_second(dates_by_customer, r0, cohort_window_months, is_final),
-        _active_customers_ttm(visits, ttm_lo, r_next, r0, is_final),
+        _active_customers_ttm(visits, ttm_lo, ttm_hi, r0, is_final),
         _reactivation_rate(dates_by_customer, r0, r_next, is_final),
     ]
 

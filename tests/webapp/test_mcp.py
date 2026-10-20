@@ -87,6 +87,13 @@ def test_cloud_reports_sales_are_list_price_minus_discount_and_match_the_kpis(ma
     assert c.execute("SELECT COUNT(*) FROM line_items").fetchone()[0] == len(CLOUD_LINES)
 
 
+def test_cloud_reports_leave_out_excluded_invoices(stores, tmp_path):
+    from lsreports.build import build_cloud_reports
+    assert build_cloud_reports(stores[0].data, tmp_path / "r.db", exclude_invoices=(1, 4)) == 3
+    c = sqlite3.connect(tmp_path / "r.db")
+    assert [n for (n,) in c.execute("SELECT wo_no FROM wo_facts ORDER BY wo_no")] == [2, 3, 5]
+
+
 def test_list_stores_shows_tiers_freshness_and_limits(manager):
     r = mcp_server.list_stores()
     shop, mason = r["stores"]

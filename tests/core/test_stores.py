@@ -50,3 +50,22 @@ def test_data_location_can_be_overridden_by_env(tmp_path, monkeypatch):
     monkeypatch.setenv("STORE_MY_SHOP_DATA", "local.db")
     (s,) = load_stores(write(tmp_path, '[[store]]\nid = "my-shop"\nname = "S"\ntier = "cloud"\n'))
     assert s.data == "local.db"
+
+
+def test_exclude_invoices_for_cloud_stores_reach_the_refresh_matrix(tmp_path, monkeypatch, capsys):
+    from core import stores as stores_mod
+    p = write(tmp_path, '[[store]]\nid = "a"\nname = "A"\ntier = "cloud"\nexclude_invoices = [1, 3]\n')
+    (s,) = load_stores(p)
+    assert s.exclude_invoices == (1, 3)
+    monkeypatch.setenv("STORES_FILE", str(p))
+    stores_mod.main(["--tier", "cloud", "--matrix"])
+    assert '"exclude_invoices": "1,3"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("body, msg", [
+    ('tier = "on-prem"\ndata = "x.sqlite"\nexclude_invoices = [1]', "for cloud stores"),
+    ('tier = "cloud"\nexclude_invoices = ["1"]', "list of invoice numbers"),
+])
+def test_bad_exclude_invoices_rejected(tmp_path, body, msg):
+    with pytest.raises(StoreConfigError, match=msg):
+        load_stores(write(tmp_path, f'[[store]]\nid = "a"\nname = "A"\n{body}\n'))

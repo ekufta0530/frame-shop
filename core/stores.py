@@ -37,7 +37,7 @@ _ID = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _KNOWN_KEYS = {
     "id", "name", "tier", "data", "secret", "chart_from", "plot_from", "baselines",
-    "outliers", "outlier_label", "notes",
+    "outliers", "outlier_label", "notes", "exclude_invoices",
 }
 _KPIS = {
     "first_to_second_rate", "repeat_revenue_share", "median_days_to_second",
@@ -62,6 +62,8 @@ class Store:
     outliers: tuple[str, ...] = ()
     outlier_label: str = ""
     notes: tuple[str, ...] = ()
+    # cloud only: invoices that were never sales (test orders), left out of every figure
+    exclude_invoices: tuple[int, ...] = ()
 
     @property
     def on_prem(self) -> bool:
@@ -106,6 +108,12 @@ def _parse(raw: dict, i: int) -> Store:
     for k in baselines:
         if k not in _KPIS:
             _fail(where, f"baselines: unknown KPI {k!r}")
+    exclude = raw.get("exclude_invoices") or []
+    if exclude and tier != CLOUD:
+        _fail(where, "exclude_invoices is for cloud stores (an on-prem store voids the ticket instead)")
+    if not isinstance(exclude, list) or not all(isinstance(n, int) and not isinstance(n, bool)
+                                                 for n in exclude):
+        _fail(where, "exclude_invoices must be a list of invoice numbers")
     return Store(
         id=sid,
         name=name.strip(),
@@ -118,6 +126,7 @@ def _parse(raw: dict, i: int) -> Store:
         outliers=tuple(raw.get("outliers") or ()),
         outlier_label=raw.get("outlier_label") or "",
         notes=tuple(raw.get("notes") or ()),
+        exclude_invoices=tuple(exclude),
     )
 
 
@@ -144,7 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     stores = [s for s in load_stores() if args.tier in (None, s.tier)]
     if args.matrix:
         print(json.dumps({"include": [
-            {"id": s.id, "name": s.name, "data": s.data, "secret": s.secret or ""} for s in stores
+            {"id": s.id, "name": s.name, "data": s.data, "secret": s.secret or "",
+             "exclude_invoices": ",".join(map(str, s.exclude_invoices))} for s in stores
         ]}))
         return 0
     for s in stores:

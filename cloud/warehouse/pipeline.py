@@ -77,7 +77,7 @@ def resolve_identities(
 
 def rebuild_visits(wh: Warehouse, settings: WarehouseSettings) -> tuple[int, int]:
     visits, lifecycles = build_visits(
-        wh.lines_for_visits(), non_sale_statuses=settings.non_sale_statuses
+        wh.lines_for_visits(settings.excluded_invoices), non_sale_statuses=settings.non_sale_statuses
     )
     wh.replace_visits(visits, lifecycles)
     log.info("visits: %d visits across %d customers", len(visits), len(lifecycles))
@@ -98,7 +98,7 @@ def snapshot_month(
 
 
 def snapshot_history(
-    wh: Warehouse, settings: WarehouseSettings, *, today: date | None = None
+    wh: Warehouse, settings: WarehouseSettings, *, today: date | None = None, refreeze: bool = False
 ) -> int:
     today = today or date.today()
     lo, _hi = wh.order_date_coverage()
@@ -111,7 +111,7 @@ def snapshot_history(
             visits, m_start, today=today,
             cohort_window_months=settings.warehouse_cohort_window_months,
         )
-        written += wh.upsert_kpi_snapshots(snaps)
+        written += wh.upsert_kpi_snapshots(snaps, refreeze=refreeze)
     log.info("snapshots: wrote/updated %d KPI rows", written)
     return written
 

@@ -90,8 +90,11 @@ DATASETS = {
             'known_cost': _met('Moulding & mat cost', 'SUM(known_cost)', 'money'),
             'mm_margin_pct': _met('Moulding & mat margin %', '100.0 * SUM(known_cost_sales - known_cost) '
                                   '/ NULLIF(SUM(known_cost_sales), 0)', 'pct'),
-            'discounts': _met('Discounts', 'SUM(discount_amt)', 'money', ANY),
-            'discount_pct': _met('Discount %', '100.0 * SUM(discount_amt) / NULLIF(SUM(list_subtotal), 0)', 'pct', ANY),
+            # list minus sale, not discount_amt: LifeSaver's on-prem fdiscamt often disagrees with
+            # the ticket (WO 12486: list 348.43, sold 250, fdiscamt 492.15), and sales use subtotal
+            'discounts': _met('Discounts', 'SUM(list_subtotal - subtotal)', 'money', ANY),
+            'discount_pct': _met('Discount %', '100.0 * SUM(list_subtotal - subtotal) / NULLIF(SUM(list_subtotal), 0)',
+                                 'pct', ANY),
             'avg_days_to_done': _met('Avg days to done', 'AVG(days_to_done)', 'num1'),
             'customers': _met('Customers', 'COUNT(DISTINCT cust_no)', 'int', ANY),
             'moulding_sales': _met('Moulding sales', 'SUM(moulding_price)', 'money'),

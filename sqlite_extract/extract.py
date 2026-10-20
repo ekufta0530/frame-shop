@@ -164,7 +164,9 @@ CREATE VIEW wo_facts AS
     coalesce(c.company, w.fcompany) AS company, c.city AS customer_city, c.zip5 AS customer_zip,
     w.fdesc AS description, w.fcomment AS comment,
     w.fsubt AS subtotal, w.ftax AS tax, w.ftotal AS total,
-    w.flistsubt AS list_subtotal, w.fdiscamt AS discount_amt, w.fdisc AS discount_code,
+    -- the discount is what the ticket actually came off list: fdiscamt often disagrees with it
+    -- (WO 12486: list 348.43, sold 250, fdiscamt 492.15); work_orders.fdiscamt keeps the raw value
+    w.flistsubt AS list_subtotal, round(w.flistsubt - w.fsubt, 2) AS discount_amt, w.fdisc AS discount_code,
     w.fmouldpr AS moulding_price, w.fmatspr AS mat_price, w.fglasspr AS glass_price,
     w.fmountpr AS mount_price, w.flaborpr AS labor_price, w.fspecialpr AS special_price,
     -- LifeSaver only records true cost for moulding/mat/fillet; glazing, specials etc. store list price
@@ -234,6 +236,17 @@ def extract(src: str | Path, out: str | Path) -> dict[str, int]:
     finally:
         con.close()
     return counts
+
+
+def refresh_views(db: str | Path) -> None:
+    """Re-create the views in an already-extracted ``db``, so a fix to them reaches a copy that was
+    published before it (the site applies this to its download of the owner's latest upload)."""
+    con = sqlite3.connect(db)
+    try:
+        con.executescript(VIEWS)
+        con.commit()
+    finally:
+        con.close()
 
 
 def main(argv: list[str] | None = None) -> None:

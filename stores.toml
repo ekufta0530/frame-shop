@@ -42,8 +42,11 @@ plot_from = { cohort = "2025-09", trailing = "2024-08" }
 baselines = { first_to_second_rate = 0.192, repeat_revenue_share = 0.273, median_days_to_second = 97, active_customers_ttm = 365 }
 outliers = ["c781adfa3958:2024-10-05", "c781adfa3958:2024-11-06"]
 outlier_label = "Polaris Mission commission"
+# Test orders from the store's first weeks on Lifesaver: "test1" and "Test Customer". After changing
+# this list, run refresh.yml with "refreeze" ticked so closed months are recomputed without them.
+exclude_invoices = [1, 3]
 notes = [
-  "The store opened on Lifesaver in May 2024 (invoice #1 is a test order), so there is no earlier history to be missing.",
+  "The store opened on Lifesaver in May 2024; its test orders (invoices #1 and #3) are left out of every figure.",
   "Customers are matched by name, since the cloud report has no customer number.",
   "The Polaris Mission toggle removes two Oct–Nov 2024 commissions for a SpaceX program (~$39.5k combined) from last-year figures. Left in, they make comparisons that reach back to late 2024 look like a sharp drop.",
 ]

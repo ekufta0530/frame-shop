@@ -17,7 +17,7 @@ import pytest
 from sqlite_extract import drive as drive_mod
 from sqlite_extract import ingest
 from sqlite_extract.drive import Drive, Upload, find_uploads
-from sqlite_extract.extract import NEEDED, SourceError, extract, find_needed, unpack_needed
+from sqlite_extract.extract import NEEDED, SourceError, extract, find_needed, refresh_views, unpack_needed
 
 # ---- a minimal dBase/FoxPro writer --------------------------------------------
 
@@ -73,7 +73,9 @@ def make_lifesaver(folder: Path, *, wo_count: int = 2, last_date: date = date(20
     tickets = []
     for n in range(1, wo_count + 1):
         base = {"FWKORDERNO": n, "FCUSTNO": 10 + n % 2, "FDATE": last_date - timedelta(days=wo_count - n),
-                "FSUBT": 150.0, "FSTATUSTXT": "Delivered", "FSP": "ECP - Christ", "FULFIELDS": FULL}
+                "FSUBT": 150.0, "FSTATUSTXT": "Delivered", "FSP": "ECP - Christ", "FULFIELDS": FULL,
+                # FDISCAMT disagrees with the ticket, as on WO 12486 in the real data
+                "FLISTSUBT": 200.0, "FDISCAMT": 492.15}
         tickets += [{**base, "FREVISION": 1, "FSUBT": 99.0}, {**base, "FREVISION": 2}]  # rev 2 is current
     write_dbf(folder / "ticket.dbf", TICKET_FIELDS, tickets)
     write_dbf(folder / "lifecust.dbf",
@@ -114,6 +116,22 @@ def test_extract_builds_wo_facts_from_latest_revision(tmp_path):
     cols = {r[1] for r in c.execute("PRAGMA table_info(work_order_revisions)")}
     assert "funused1" not in cols and "finished_h" in cols
     assert "pymxtoken" not in {r[1] for r in c.execute("PRAGMA table_info(payments)")}
+
+
+def test_discount_is_list_minus_sale_not_fdiscamt(tmp_path):
+    src = make_lifesaver(tmp_path / "ls")
+    db = tmp_path / "out.sqlite"
+    extract(src, db)
+    c = sqlite3.connect(db)
+    assert c.execute("SELECT DISTINCT discount_amt FROM wo_facts").fetchall() == [(50.0,)]
+    # a copy published before the fix gets the current views from refresh_views
+    c.executescript("DROP VIEW comp_facts; DROP VIEW wo_facts; "
+                    "CREATE VIEW wo_facts AS SELECT fdiscamt AS discount_amt FROM work_orders;")
+    c.close()
+    refresh_views(db)
+    c = sqlite3.connect(db)
+    assert c.execute("SELECT DISTINCT discount_amt FROM wo_facts").fetchall() == [(50.0,)]
+    assert c.execute("SELECT COUNT(*) FROM comp_facts").fetchone()[0] > 0
 
 
 def test_find_needed_picks_shallowest_ticket_folder_case_insensitively():

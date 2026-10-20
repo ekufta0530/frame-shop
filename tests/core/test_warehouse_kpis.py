@@ -86,6 +86,19 @@ def test_not_final_before_month_closes():
     assert all(s.is_final is False for s in snaps)
 
 
+def test_open_month_trailing_window_ends_at_today():
+    # cG visited 2025-09-25: inside the 12 months to 2026-09-20, though before October 2025, where
+    # the whole-month window would start; cH (2025-09-15) is outside either way
+    lines = SCENARIO + [L("cG", "2025-09-25", 70), L("cH", "2025-09-15", 30)]
+    visits, _ = build_visits(lines, non_sale_statuses=EMPTY)
+    by = {s.metric: s for s in compute_kpis(visits, date(2026, 9, 1), today=date(2026, 9, 20))}
+    assert by[ACTIVE_CUSTOMERS_TTM].value == 5.0  # cB, cD, cE, cF + cG
+    assert by[REPEAT_REVENUE_SHARE].denominator == pytest.approx(750.0 + 70.0)
+    # once the month closes it is 12 whole months again
+    by = {s.metric: s for s in compute_kpis(visits, date(2026, 9, 1), today=date(2026, 10, 1))}
+    assert by[ACTIVE_CUSTOMERS_TTM].value == 4.0
+
+
 def test_empty_cohort_gives_none_value():
     visits, _ = build_visits(SCENARIO, non_sale_statuses=EMPTY)
     snaps = compute_kpis(

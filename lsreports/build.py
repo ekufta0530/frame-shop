@@ -22,6 +22,9 @@ from pathlib import Path
 # The columns every level has: what pooled reports carry from each store.
 BASIC_COLUMNS = ('wo_no', 'invoice_no', 'cust_no', 'customer_name', 'order_date', 'promised_date',
                  'status', 'description', 'subtotal', 'list_subtotal', 'discount_amt', 'customer_type')
+# How pooled reports read a column, where not as-is: customer numbers get the store prefix, and the
+# discount is list minus sale whatever the source's view says (older on-prem extracts used fdiscamt)
+_POOLED_PICK = {'cust_no': "? || '/' || cust_no", 'discount_amt': 'ROUND(list_subtotal - subtotal, 2)'}
 
 # One row per work order. A work order's line items share its id (work_order_number is
 # "<id>.<revision>"). Void lines are left out of the money unless the whole order is void, the
@@ -31,7 +34,7 @@ CREATE TABLE wo_facts AS
 WITH lines AS (
   SELECT *, lower(coalesce(current_status, '')) != 'void' AS live,
          MAX(lower(coalesce(current_status, '')) != 'void') OVER (PARTITION BY work_order_id) AS has_live
-  FROM line_items
+  FROM line_items WHERE {keep}
 ),
 wo AS (
   SELECT work_order_id AS wo_no, MAX(invoice_number) AS invoice_no, MAX(customer_id) AS cust_no,
@@ -65,8 +68,10 @@ def _drop_journal(db: Path) -> None:
         p.unlink(missing_ok=True)
 
 
-def build_cloud_reports(warehouse: str | Path, dest: str | Path) -> int:
-    """(Re)create ``dest`` as ``warehouse`` plus ``wo_facts``. Returns the number of work orders."""
+def build_cloud_reports(warehouse: str | Path, dest: str | Path, *,
+                        exclude_invoices: Sequence[int] = ()) -> int:
+    """(Re)create ``dest`` as ``warehouse`` plus ``wo_facts``, leaving out ``exclude_invoices``
+    (the store's test orders, as the KPI pipeline does). Returns the number of work orders."""
     dest = Path(dest)
     _fresh(dest)
     tmp = Path(f'{dest}.part')
@@ -77,7 +82,9 @@ def build_cloud_reports(warehouse: str | Path, dest: str | Path) -> int:
         # the copy inherits the warehouse's WAL mode, and a WAL file can't be opened read-only
         # without its -shm file: make it a plain single file
         out.execute('PRAGMA journal_mode = DELETE')
-        out.executescript(_CLOUD_WO_FACTS)
+        excluded = ', '.join(str(int(n)) for n in exclude_invoices)
+        keep = f'invoice_number IS NULL OR invoice_number NOT IN ({excluded})' if excluded else '1'
+        out.executescript(_CLOUD_WO_FACTS.format(keep=keep))
         n = out.execute('SELECT COUNT(*) FROM wo_facts').fetchone()[0]
         out.commit()
     finally:
@@ -102,7 +109,7 @@ def build_pooled_reports(sources: Sequence[tuple[str, str, str | Path]], dest: s
         for store_id, name, path in sources:
             out.execute('ATTACH ? AS src', (f'file:{path}?mode=ro',))
             try:
-                picked = ', '.join("? || '/' || cust_no" if c == 'cust_no' else c for c in BASIC_COLUMNS)
+                picked = ', '.join(_POOLED_PICK.get(c, c) for c in BASIC_COLUMNS)
                 out.execute(f'INSERT INTO wo_facts SELECT ?, {picked} FROM src.wo_facts WHERE order_date <= ?',
                             (name, store_id, through.isoformat()))
                 out.commit()

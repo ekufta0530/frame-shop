@@ -132,3 +132,14 @@ def test_checkpoints(wh):
     wh.set_checkpoint("k", "2025-08-01")
     wh.set_checkpoint("k", "2025-09-01")
     assert wh.get_checkpoint("k") == "2025-09-01"
+
+
+def test_excluded_invoices_never_reach_a_visit(wh):
+    from cloud.warehouse import pipeline
+    from cloud.warehouse.config import WarehouseSettings
+    wh.upsert_line_items([wo(1, "1.1", "Test Customer", retail=999.0), wo(2, "2.1", "Alice")],
+                         "p1", "2025-09-01T00:00:00Z")
+    settings = WarehouseSettings(warehouse_excluded_invoices="1")
+    pipeline.resolve_identities(wh, settings)
+    assert pipeline.rebuild_visits(wh, settings) == (1, 1)  # Alice only
+    assert sum(v.revenue for v in wh.load_all_visits()) == 100.0

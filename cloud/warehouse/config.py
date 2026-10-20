@@ -40,6 +40,14 @@ class WarehouseSettings(KpiSettings):
     # conservative default is not to merge.
     warehouse_split_commercial_contact: bool = False
 
+    # Comma-separated invoice numbers that were never sales (test orders): their lines stay in
+    # line_items but never reach a visit. refresh.yml sets it from the store's exclude_invoices.
+    warehouse_excluded_invoices: str = ""
+
+    @property
+    def excluded_invoices(self) -> frozenset[int]:
+        return frozenset(int(s) for s in self.warehouse_excluded_invoices.split(",") if s.strip())
+
 
 @lru_cache
 def get_warehouse_settings() -> WarehouseSettings:
