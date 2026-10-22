@@ -70,18 +70,23 @@ META = [
         ),
     },
     {
-        "key": "reactivation_rate", "label": "Reactivation rate", "tile": "Reactivation",
-        "unit": "pct", "good": "up", "kind": "cohort",
-        "short": "Win-back rate among long-lapsed customers.",
+        "key": "reactivated_customers_ttm", "label": "Reactivated customers", "tile": "Reactivated",
+        "unit": "int", "good": "up", "kind": "cohort",
+        "short": "Lapsed customers who came back, trailing 12 months.",
         "long": (
-            "At the month's start, take every customer who had bought before but not in the "
-            "previous 365 days — the lapsed pool. What share of them bought something during "
-            "the month? With no win-back campaign running this sits near zero; it is the "
-            "number that should move when one goes out."
+            "A customer is lapsed when they have bought before but not in the previous 365 days. "
+            "This counts how many lapsed customers came back and bought in the trailing 12 "
+            "months. It is a count, not a share of the lapsed pool, because that pool holds "
+            "every customer who ever drifted away and only grows, so a rate over it sinks on its "
+            "own. This is the number that should move when a win-back campaign goes out."
         ),
     },
 ]
 KPI_KEYS = [m["key"] for m in META]
+# Derived in the view from a stored KPI: the reactivation_rate numerator (customers who came back
+# that month), summed over 12 months. Stored rows stay as they are, so frozen months need no rebuild.
+REACTIVATED_TTM = "reactivated_customers_ttm"
+STORED_KPIS = [k for k in KPI_KEYS if k != REACTIVATED_TTM] + ["reactivation_rate"]
 
 METHOD = [
     "**A purchase is a visit** — one customer on one day. Several work orders dropped off "
@@ -167,7 +172,7 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 def _series(c: sqlite3.Connection) -> dict[str, dict[str, dict]]:
-    out: dict[str, dict[str, dict]] = {k: {} for k in KPI_KEYS}
+    out: dict[str, dict[str, dict]] = {k: {} for k in STORED_KPIS}
     for r in c.execute(
         "SELECT metric, month, value, numerator, denominator, is_final FROM kpi_monthly "
         "WHERE calc_version = ? ORDER BY month", (CALC_VERSION,)
@@ -177,7 +182,16 @@ def _series(c: sqlite3.Connection) -> dict[str, dict[str, dict]]:
                 "v": r["value"], "n": r["numerator"], "d": r["denominator"],
                 "final": bool(r["is_final"]),
             }
+    out[REACTIVATED_TTM] = _trailing_count(out["reactivation_rate"])
     return out
+
+
+def _trailing_count(monthly: dict[str, dict]) -> dict[str, dict]:
+    """Each month's numerator summed with the 11 months before it. A month missing from the window
+    predates the data, so it counts as nobody."""
+    return {m: {"v": sum((monthly.get(_shift(m, -i)) or {}).get("n") or 0 for i in range(12)),
+                "n": None, "d": None, "final": p["final"]}
+            for m, p in monthly.items()}
 
 
 def _outlier_visits(c: sqlite3.Connection, outliers: list[str]) -> list[dict]:

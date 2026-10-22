@@ -1,6 +1,6 @@
 import { StrictMode, Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Link, NavLink, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { api, storage, useApi } from './api';
 import { THEME_EVENT, storeColor, useColors } from './charts';
 import ErrorBoundary from './ErrorBoundary';
@@ -42,12 +42,18 @@ function App() {
   const c = useColors();
   const st = useApi<StoresResponse>('/api/stores');
   const stores = st.data?.stores ?? [];
+  const all = st.data?.all_stores ?? false;
+  // A store owner's home is their own store; only admins get the all-stores overview.
+  const home = all || !stores.length ? '/' : `/stores/${stores[0].id}`;
+  const overview = (tab: 'dashboard' | 'reports') => all ? <Overview stores={stores} tab={tab} />
+    : stores.length ? <Navigate to={home} replace />
+      : <div className="page"><div className="error">Your account isn't linked to a store yet — ask the site admin.</div></div>;
   return (
     <>
       <header className="topbar">
-        <Link to="/" className="brand"><span className="brand-mark" /><span>Frame Shop</span></Link>
+        <Link to={home} className="brand"><span className="brand-mark" /><span>Frame Shop</span></Link>
         <nav className="nav" aria-label="Stores">
-          <NavLink to="/" end>Overview</NavLink>
+          {all && <NavLink to="/" end>Overview</NavLink>}
           {stores.map((s) => (
             <NavLink key={s.id} to={`/stores/${s.id}`}>
               <span className="dot" style={{ background: storeColor(c, s.slot), opacity: s.ok ? 1 : 0.35 }} />{s.name}
@@ -60,11 +66,11 @@ function App() {
       {st.error && <div className="page"><div className="error">{st.error}</div></div>}
       {st.data && (
         <ErrorBoundary><Suspense fallback={loading}><Routes>
-          <Route path="/" element={<Overview stores={stores} tab="dashboard" />} />
-          <Route path="/reports" element={<Overview stores={stores} tab="reports" />} />
+          <Route path="/" element={overview('dashboard')} />
+          <Route path="/reports" element={overview('reports')} />
           <Route path="/stores/:storeId" element={<StorePage stores={stores} tab="dashboard" />} />
           <Route path="/stores/:storeId/reports" element={<StorePage stores={stores} tab="reports" />} />
-          <Route path="*" element={<div className="page"><div className="error">Page not found. <Link to="/">Back to the overview</Link></div></div>} />
+          <Route path="*" element={<div className="page"><div className="error">Page not found. <Link to={home}>Back to the start</Link></div></div>} />
         </Routes></Suspense></ErrorBoundary>
       )}
       {!st.data && !st.error && loading}

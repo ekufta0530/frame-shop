@@ -20,7 +20,9 @@ def _jwt(claims):
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     allow = tmp_path / "users.json"
-    allow.write_text(json.dumps({"owner@gmail.com": {"name": "Owner"}}))
+    allow.write_text(json.dumps({"owner@gmail.com": {"name": "Owner", "role": "owner", "stores": ["mason"]},
+                                 "norole@gmail.com": {"name": "Listed, no access"},
+                                 "nostores@gmail.com": {"name": "Owner of nothing", "role": "owner", "stores": []}}))
     monkeypatch.setattr(users, "USERS_URI", str(allow))
     monkeypatch.setitem(users._cache, "users", None)
     monkeypatch.setattr(auth, "AUTH_DISABLED", False)
@@ -65,6 +67,21 @@ def test_an_account_not_on_the_allowlist_is_turned_away(client, monkeypatch):
     r = _callback(client, monkeypatch, q, email="stranger@gmail.com")
     assert r.headers["location"] == "/login?error=not_allowed"
     assert auth.COOKIE not in client.cookies
+
+
+@pytest.mark.parametrize("email", ["norole@gmail.com", "nostores@gmail.com"])
+def test_a_listed_account_that_grants_no_store_is_turned_away_too(client, monkeypatch, email):
+    _, q = _start(client)
+    assert _callback(client, monkeypatch, q, email=email).headers["location"] == "/login?error=not_allowed"
+    client.cookies.set(auth.COOKIE, auth.make_token(email))  # nor does an old session still work
+    assert client.get("/api/me").status_code == 401
+
+
+def test_me_says_what_the_account_may_see(client, monkeypatch):
+    _, q = _start(client)
+    _callback(client, monkeypatch, q)
+    me = client.get("/api/me").json()
+    assert (me["role"], me["stores"]) == ("owner", ["mason"])
 
 
 @pytest.mark.parametrize("bad", [{"aud": "someone-else"}, {"iss": "https://evil.example"},

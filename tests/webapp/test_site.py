@@ -1,4 +1,5 @@
 """The website's data manager and API, over two tiny synthetic stores (one per tier)."""
+import json
 import sqlite3
 from datetime import date
 
@@ -11,7 +12,7 @@ from core.store import DATA_THROUGH, Warehouse
 from core.stores import Store
 from core.visits import LineForVisit, build_visits
 from sqlite_extract.importer import import_store
-from webapp import auth, server
+from webapp import auth, server, users
 from webapp.data import DataManager
 
 CLOUD_ROWS = [("c1", "2025-01-10", 100.0), ("c1", "2025-07-01", 50.0), ("c2", "2025-02-01", 80.0),
@@ -210,3 +211,66 @@ def test_outliers_come_out_of_the_revenue_weighted_kpi_and_the_overview(stores, 
     shop = client.get("/api/overview").json()["stores"][0]
     assert shop["outlier_monthly"] == {"2025-08": {"rev": 70.0, "v": 1}}
     assert "repeat_revenue_share" in shop["history_ex"]
+
+
+# --- who sees what -------------------------------------------------------------------------------
+
+@pytest.fixture
+def signed_in(client, tmp_path, monkeypatch):
+    """client, signed in as whichever users.json account the test names."""
+    allow = tmp_path / "users.json"
+    allow.write_text(json.dumps({"boss@gmail.com": {"name": "Boss", "role": "admin"},
+                                 "owner@gmail.com": {"name": "Owner", "role": "owner", "stores": ["mason"]}}))
+    monkeypatch.setattr(users, "USERS_URI", str(allow))
+    monkeypatch.setitem(users._cache, "users", None)
+    monkeypatch.setattr(auth, "AUTH_DISABLED", False)
+
+    def as_(email):
+        client.cookies.set(auth.COOKIE, auth.make_token(email))
+        return client
+    return as_
+
+
+STORE_ROUTES = [("get", "dashboard", None), ("get", "insights", None), ("get", "catalog", None),
+                ("get", "schema", None), ("get", "values?dataset=work_orders&dim=year", None),
+                ("post", "report", {"dataset": "work_orders", "dimensions": ["year"], "metrics": ["jobs"]}),
+                ("post", "sql", {"sql": "SELECT 1"})]
+
+
+def _call(c, method, store, route, body):
+    url = f"/api/stores/{store}/{route}"
+    return c.post(url, json=body) if method == "post" else c.get(url)
+
+
+@pytest.mark.parametrize("method, route, body", STORE_ROUTES)
+def test_an_owner_reaches_their_own_store_but_no_other_or_the_pool(signed_in, method, route, body):
+    c = signed_in("owner@gmail.com")
+    assert _call(c, method, "mason", route, body).status_code == 200
+    for other in ("shop", "all"):
+        r = _call(c, method, other, route, body)
+        assert r.status_code == 404 and r.json()["detail"] == f"No store {other!r}"  # same as a store that doesn't exist
+
+
+def test_an_owner_sees_only_their_store_listed_and_no_overview(signed_in):
+    c = signed_in("owner@gmail.com")
+    r = c.get("/api/stores").json()
+    assert [(s["id"], s["slot"]) for s in r["stores"]] == [("mason", 1)]  # slot keeps its colour
+    assert r["all_stores"] is False and r["combined_through"] is None
+    assert c.get("/api/overview").status_code == 404
+
+
+def test_an_admin_sees_every_store_the_overview_and_the_pool(signed_in):
+    c = signed_in("boss@gmail.com")
+    r = c.get("/api/stores").json()
+    assert [s["id"] for s in r["stores"]] == ["shop", "mason"] and r["all_stores"] is True
+    assert c.get("/api/overview").status_code == 200
+    assert c.get("/api/stores/all/dashboard").status_code == 200
+    assert c.get("/api/stores/shop/dashboard").status_code == 200
+
+
+def test_every_store_route_checks_access():
+    """A new /api/stores/{store_id}/... route that forgets the check would leak every store to owners."""
+    routes = [r for r in server.app.routes if "{store_id}" in getattr(r, "path", "")]
+    assert len(routes) == len(STORE_ROUTES)
+    for r in routes:
+        assert any(d.call is server._visible for d in r.dependant.dependencies), r.path

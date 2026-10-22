@@ -273,12 +273,14 @@ function KpiChart({ d, meta, p }: { d: Dashboard; meta: KpiMeta; p: Period }) {
   const pts = kpiPoints(d, meta, p.asOf);
   const head = d.series[meta.key]?.[p.asOf];
   const band = p.kind === 'quarter' ? qMonths(p.year, p.q!).filter((m) => pts.some((x) => x.m === m)) : null;
-  const pool = meta.key === 'reactivation_rate' && head?.d != null ? Math.round(head.d) : null;
+  const month = meta.key === 'reactivated_customers_ttm' ? d.series.reactivation_rate?.[p.asOf] : undefined;
   return (
     <Card title={meta.label} blurb={meta.short} info={meta.long}
       foot={<>
         {meta.baseline != null ? `Dashed line: first-pass baseline, ${fmtUnit(meta.baseline, meta.unit)}. ` : ''}
-        {pool != null ? `Lapsed pool this month: ${pool.toLocaleString()} customers. ` : ''}
+        {month?.n != null && month.d != null
+          ? `${mname(p.asOf)}: ${Math.round(month.n).toLocaleString()} came back, of ${Math.round(month.d).toLocaleString()} lapsed customers. `
+          : ''}
         {head && !head.final ? `${mname(p.asOf)} is still open.` : ''}
       </>}>
       {pts.length ? <TrendChart meta={meta} points={pts} band={band} /> : <p className="muted">Not enough history yet.</p>}

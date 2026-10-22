@@ -3,16 +3,17 @@
     uvicorn webapp.server:app --port 8765          # needs webapp/frontend/dist (npm run build)
 
 Pages (client-side routes, all served index.html):
-    /                       all-stores overview: stores side by side + the pooled dashboard
+    /                       all-stores overview: stores side by side + the pooled dashboard (admins only)
     /stores/<id>            one store's dashboard (+ the on-prem section for on-prem stores)
     /stores/<id>/reports    report builder + SQL console (every store; cloud stores have fewer fields)
-    /reports                the same over every store pooled
+    /reports                the same over every store pooled (admins only)
     /login
     /privacy, /terms        the public privacy policy and terms (served by the API, not the SPA)
     /mcp/<token>            the MCP server for Claude (webapp/mcp_server.py; its own token, not the login)
 
 Data comes from ``webapp.data.manager`` (see there); payloads are cached until any store's data
-changes. Env: STORES_FILE, STORE_<ID>_DATA, USERS_URI, SESSION_SECRET, AUTH_DISABLED=1 (local).
+changes. Who sees what is users.py's call: every /api/stores/<id>/... route checks it (see _visible),
+and a store someone may not see answers 404 just like one that doesn't exist. Env: STORES_FILE, STORE_<ID>_DATA, USERS_URI, SESSION_SECRET, AUTH_DISABLED=1 (local).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -33,6 +34,7 @@ from lsreports import db as lsdb
 from lsreports import presets, semantic
 
 from . import auth
+from . import users
 from . import mcp_server
 from .data import manager
 from .insights import insights
@@ -103,6 +105,20 @@ def _cached(key: tuple, build):
     return value
 
 
+def _visible(request: Request, store_id: str):
+    """Dependency for every /api/stores/{store_id}/... route: other people's stores look missing."""
+    if not users.can_see(request.state.user, store_id):
+        raise HTTPException(404, f"No store {store_id!r}")
+
+
+def _admin(request: Request):
+    if not users.is_admin(request.state.user):
+        raise HTTPException(404, "Not found")
+
+
+STORE = [Depends(_visible)]
+
+
 def _store_or_404(snap, store_id: str):
     sd = snap.get(store_id)
     if sd is None:
@@ -136,25 +152,28 @@ def _on_prem_or_404(snap, store_id: str):
 # --- stores, overview, dashboards ---------------------------------------------
 
 @app.get("/api/stores")
-def stores():
+def stores(request: Request):
     snap = manager.snapshot()
+    user = request.state.user
+    admin = users.is_admin(user)
     return {
         "stores": [{
             "id": s.store.id, "name": s.store.name, "tier": s.store.tier, "slot": i,
             "ok": s.ok, "error": s.error,
             "outlier_label": (s.store.outlier_label or "one-off outlier") if s.store.outliers else "",
             "data_through": s.data_through.isoformat() if s.data_through else None,
-        } for i, s in enumerate(snap.stores)],
-        "combined_through": snap.combined_through.isoformat() if snap.combined_through else None,
+        } for i, s in enumerate(snap.stores) if users.can_see(user, s.store.id)],  # slot stays global: same colours for everyone
+        "all_stores": admin,  # the overview and pooled reports
+        "combined_through": snap.combined_through.isoformat() if admin and snap.combined_through else None,
     }
 
 
-@app.get("/api/overview")
+@app.get("/api/overview", dependencies=[Depends(_admin)])
 def get_overview():
     return _cached(("overview",), overview)
 
 
-@app.get("/api/stores/{store_id}/dashboard")
+@app.get("/api/stores/{store_id}/dashboard", dependencies=STORE)
 def dashboard(store_id: str):
     def build(snap):
         if store_id == ALL_STORES:
@@ -167,7 +186,7 @@ def dashboard(store_id: str):
     return _cached(("dashboard", store_id), build)
 
 
-@app.get("/api/stores/{store_id}/insights")
+@app.get("/api/stores/{store_id}/insights", dependencies=STORE)
 def store_insights(store_id: str):
     def build(snap):
         sd = _on_prem_or_404(snap, store_id)
@@ -177,7 +196,7 @@ def store_insights(store_id: str):
 
 # --- report builder ------------------------------------------------------------------
 
-@app.get("/api/stores/{store_id}/catalog")
+@app.get("/api/stores/{store_id}/catalog", dependencies=STORE)
 def catalog(store_id: str):
     sd = _reports_or_404(manager.snapshot(), store_id)
     with lsdb.using(sd.reports_path):
@@ -185,7 +204,7 @@ def catalog(store_id: str):
                 "limits": semantic.LEVEL_NOTES.get(sd.level), "data": lsdb.data_info()}
 
 
-@app.post("/api/stores/{store_id}/report")
+@app.post("/api/stores/{store_id}/report", dependencies=STORE)
 def report(store_id: str, spec: dict):
     sd = _reports_or_404(manager.snapshot(), store_id)
     with lsdb.using(sd.reports_path):
@@ -195,14 +214,14 @@ def report(store_id: str, spec: dict):
             raise semantic.SpecError(f"invalid report spec: {e}") from e
 
 
-@app.get("/api/stores/{store_id}/values")
+@app.get("/api/stores/{store_id}/values", dependencies=STORE)
 def values(store_id: str, dataset: str, dim: str, q: str | None = None):
     sd = _reports_or_404(manager.snapshot(), store_id)
     with lsdb.using(sd.reports_path):
         return semantic.dimension_values(dataset, dim, q, level=sd.level)
 
 
-@app.get("/api/stores/{store_id}/schema")
+@app.get("/api/stores/{store_id}/schema", dependencies=STORE)
 def schema(store_id: str):
     sd = _reports_or_404(manager.snapshot(), store_id)
     with lsdb.using(sd.reports_path):
@@ -213,7 +232,7 @@ class SqlIn(BaseModel):
     sql: str
 
 
-@app.post("/api/stores/{store_id}/sql")
+@app.post("/api/stores/{store_id}/sql", dependencies=STORE)
 def run_sql(store_id: str, body: SqlIn):
     sd = _reports_or_404(manager.snapshot(), store_id)
     # read-only connection with query_only and a time limit: this can't modify anything

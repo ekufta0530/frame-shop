@@ -88,14 +88,16 @@ read -s "?client id: " V; printf '%s' "$V" | gcloud secrets create lifesaver-oau
 read -s "?client secret: " V; printf '%s' "$V" | gcloud secrets create lifesaver-oauth-client-secret --data-file=-; unset V
 # 3. create the service, its service account and bucket/secret access (creates the session secret):
 webapp/deploy.sh
-# 4. who may sign in -- Google account emails; add or remove people with:
-webapp/users.sh add owner@gmail.com --name "Store Owner"
+# 4. who may sign in -- Google account emails -- and what each sees:
+webapp/users.sh add partner@gmail.com --name "Partner" --admin        # every store + the overview
+webapp/users.sh add owner@gmail.com --name "Store Owner" --store mason  # just their store
 ```
 
 The service is public at the Cloud Run level; the gate is Google sign-in (`auth.py`: authorization-code
 flow with PKCE, state and nonce, verified email) plus the email allowlist in `users.json`, with a signed
-session cookie after that. There are no passwords and no password form. Everyone on the allowlist sees
-every store. For local sign-in testing set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (and
+session cookie after that. There are no passwords and no password form. Each allowlist entry has a role
+(`users.py`): an admin sees every store, the overview and the pooled reports; an owner sees only their
+listed stores, and the server answers 404 for anything else. An entry with no role can't sign in. For local sign-in testing set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (and
 `OAUTH_REDIRECT_URI` if not on localhost:8765) instead of `AUTH_DISABLED=1`.
 
 ### Setting up a project (or moving to a new one)

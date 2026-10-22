@@ -6,7 +6,8 @@ export interface StoreInfo {
   id: string; name: string; tier: Tier; slot: number; ok: boolean; error: string | null;
   data_through: string | null; outlier_label: string;
 }
-export interface StoresResponse { stores: StoreInfo[]; combined_through: string | null }
+// stores: only the ones this user may see; all_stores: whether they get the overview + pooled reports (admins)
+export interface StoresResponse { stores: StoreInfo[]; all_stores: boolean; combined_through: string | null }
 
 export interface KpiPoint { v: number | null; n: number | null; d: number | null; final: boolean }
 export interface KpiMeta {

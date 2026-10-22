@@ -145,7 +145,7 @@ def test_kpis_are_the_dashboards_numbers(manager):
     assert r["data_through"] == "2025-09-10"
     assert [k["key"] for k in r["kpis"]] == ["first_to_second_rate", "repeat_revenue_share",
                                              "median_days_to_second", "active_customers_ttm",
-                                             "reactivation_rate"]
+                                             "reactivated_customers_ttm"]
     active = next(k for k in r["kpis"] if k["key"] == "active_customers_ttm")
     assert [m["month"] for m in active["months"]] == ["2025-07", "2025-08", "2025-09"]
     assert active["months"][-1]["final"] is False  # September isn't over

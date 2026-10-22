@@ -1,4 +1,11 @@
-"""Who may sign in: a JSON file of {email: {name}} kept next to the data.
+"""Who may sign in, and what they may see: a JSON file of {email: {name, role, stores}} kept next to the data.
+
+    {"boss@gmail.com":  {"name": "Boss",  "role": "admin"},
+     "owner@gmail.com": {"name": "Owner", "role": "owner", "stores": ["mason"]}}
+
+An admin sees every store, the all-stores overview and the pooled reports. An owner sees only the
+stores listed -- never the overview or "all", which carry the other stores' numbers. Anything else (no
+role, an unknown one, an owner with no stores) is denied: that account can't sign in.
 
 USERS_URI is a local path or gs://bucket/users.json. There are no passwords -- people prove who they are
 with Google, and this file is the allowlist of Google accounts that may see the site.
@@ -12,6 +19,7 @@ from pathlib import Path
 
 USERS_URI = os.environ.get('USERS_URI', str(Path(__file__).resolve().parent.parent / 'users.json'))
 REFRESH_SECONDS = 60
+ADMIN, OWNER = 'admin', 'owner'
 
 _lock = threading.Lock()
 _cache = {'users': None, 'checked': 0.0}
@@ -44,6 +52,23 @@ def all_users():
         return _cache['users']
 
 
+def grants_access(rec):
+    """Whether a users.json record lets its account in at all (default deny)."""
+    if not isinstance(rec, dict):
+        return False
+    return rec.get('role') == ADMIN or (rec.get('role') == OWNER and bool(rec.get('stores')))
+
+
 def lookup(email):
-    """The allowlist record for a Google account's email, or None."""
-    return all_users().get(normalize(email))
+    """The allowlist record for a Google account's email, or None if it's missing or grants nothing."""
+    rec = all_users().get(normalize(email))
+    return rec if grants_access(rec) else None
+
+
+def is_admin(user):
+    return user.get('role') == ADMIN
+
+
+def can_see(user, store_id):
+    """Whether a signed-in user (request.state.user) may see a store's data; "all" is admins only."""
+    return is_admin(user) or store_id in user.get('stores', ())

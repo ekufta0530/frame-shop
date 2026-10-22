@@ -2,8 +2,8 @@
 
 There is no password form. /api/login/google sends the browser to Google; Google sends it back to
 /auth/callback with a one-time code, which is exchanged (server to server, with the client secret) for
-an ID token. The signed-in email must be on the allowlist in users.json (see users.py / manage_users.py);
-everyone on it sees every store.
+an ID token. The signed-in email must be on the allowlist in users.json (see users.py / manage_users.py),
+whose role says which stores it sees; server.py enforces that on every store route.
 
 The session cookie holds {email, expiry} signed with SESSION_SECRET, so no server-side session store is
 needed. Removing someone from users.json ends their session within a minute.
@@ -88,7 +88,8 @@ def read_token(token):
     user = users.lookup(data['u']) if data else None
     if not user:
         return None
-    return {'username': data['u'], 'name': user.get('name') or data['u']}
+    return {'username': data['u'], 'name': user.get('name') or data['u'], 'role': user['role'],
+            'stores': list(user.get('stores') or ()) if user['role'] == users.OWNER else []}
 
 
 def _secure(request):
@@ -129,7 +130,7 @@ def _id_token_claims(id_token):
 
 async def auth_middleware(request: Request, call_next):
     if AUTH_DISABLED:
-        request.state.user = {'username': 'dev', 'name': 'Local dev'}
+        request.state.user = {'username': 'dev', 'name': 'Local dev', 'role': users.ADMIN, 'stores': []}
         return await call_next(request)
     path = request.url.path
     if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
