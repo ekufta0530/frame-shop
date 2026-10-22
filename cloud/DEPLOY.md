@@ -41,7 +41,7 @@ and let this repo impersonate it:
 
 ```bash
 PROJECT=frame-shop-511616
-REPO=ekufta0530/lifesaver-mcp
+REPO=ekufta0530/frame-shop
 SA=gha-deployer@$PROJECT.iam.gserviceaccount.com
 
 # WIF with a service_account uses impersonation -> this API must be on, or the
@@ -90,7 +90,7 @@ Re-run an earlier successful workflow, or pin to an older image:
 
 ```bash
 gcloud run services update frame-shop --region=us-west1 \
-  --image=ghcr.io/ekufta0530/lifesaver-mcp-site:sha-<older-commit>
+  --image=ghcr.io/ekufta0530/frame-shop-site:sha-<older-commit>
 ```
 
 ---

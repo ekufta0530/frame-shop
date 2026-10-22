@@ -13,7 +13,7 @@ set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT=<new project id>}"
 OLD_PROJECT="${OLD_PROJECT:-mcps-507817}"
-REPO="${REPO:-ekufta0530/lifesaver-mcp}"
+REPO="${REPO:-ekufta0530/frame-shop}"
 REGION="${REGION:-us-west1}"
 DATA_BUCKET="${DATA_BUCKET:-${PROJECT}-lifesaver-data}"
 WAREHOUSE_BUCKET="${WAREHOUSE_BUCKET:-${PROJECT}-kpi-warehouse}"
