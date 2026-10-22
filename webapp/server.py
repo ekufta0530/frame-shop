@@ -168,6 +168,14 @@ def stores(request: Request):
     }
 
 
+@app.get("/api/connect", dependencies=[Depends(_admin)])
+def connect(request: Request):
+    """The MCP connector URL for the Connect page. It embeds the token, so it is admins-only."""
+    if not mcp_server.TOKEN:
+        return {"enabled": False, "url": None}
+    return {"enabled": True, "url": f"{str(request.base_url).rstrip('/')}/mcp/{mcp_server.TOKEN}"}
+
+
 @app.get("/api/overview", dependencies=[Depends(_admin)])
 def get_overview():
     return _cached(("overview",), overview)

@@ -282,3 +282,12 @@ def test_every_store_route_checks_access():
 def test_a_renamed_stores_old_links_redirect(client, old, new):
     r = client.get(old, follow_redirects=False)
     assert r.status_code == 301 and r.headers["location"] == new
+
+
+def test_connect_link_is_admin_only(signed_in, monkeypatch):
+    monkeypatch.setattr(server.mcp_server, "TOKEN", "tok123")
+    assert signed_in("owner@gmail.com").get("/api/connect").status_code == 404
+    r = signed_in("boss@gmail.com").get("/api/connect").json()
+    assert r["enabled"] is True and r["url"].endswith("/mcp/tok123")
+    monkeypatch.setattr(server.mcp_server, "TOKEN", "")
+    assert signed_in("boss@gmail.com").get("/api/connect").json() == {"enabled": False, "url": None}

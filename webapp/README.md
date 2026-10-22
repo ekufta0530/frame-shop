@@ -157,6 +157,8 @@ webapp/mcp_url.sh                # prints the connector URL
 webapp/deploy.sh --rotate-mcp    # new token; existing connector URLs stop working
 ```
 
+Admins also get these steps, with the link filled in, behind the **Connect to Claude** button in the site's top bar (`/connect`, `GET /api/connect`).
+
 In claude.ai: Settings → Connectors → Add custom connector, paste the URL, leave the OAuth fields empty.
 For Claude Code: `claude mcp add --transport http frame-shop "<url>"`. There is no OAuth: the URL is the
 credential (it also appears in Cloud Run's request logs), so treat it like a password. Wrong or missing

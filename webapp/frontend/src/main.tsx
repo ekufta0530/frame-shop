@@ -9,6 +9,7 @@ import './styles.css';
 
 const Login = lazy(() => import('./pages/Login'));
 const Overview = lazy(() => import('./pages/Overview'));
+const Connect = lazy(() => import('./pages/Connect'));
 const StorePage = lazy(() => import('./pages/StorePage'));
 const loading = <div className="page"><div className="loading">Loading…</div></div>;
 
@@ -61,13 +62,17 @@ function App() {
           ))}
         </nav>
         <div className="spacer" />
-        <div className="top-right"><UserMenu /><ThemeToggle /></div>
+        <div className="top-right">
+          {all && <NavLink to="/connect" className="connect-btn">Connect to Claude</NavLink>}
+          <UserMenu /><ThemeToggle />
+        </div>
       </header>
       {st.error && <div className="page"><div className="error">{st.error}</div></div>}
       {st.data && (
         <ErrorBoundary><Suspense fallback={loading}><Routes>
           <Route path="/" element={overview('dashboard')} />
           <Route path="/reports" element={overview('reports')} />
+          <Route path="/connect" element={all ? <Connect /> : <Navigate to={home} replace />} />
           <Route path="/stores/:storeId" element={<StorePage stores={stores} tab="dashboard" />} />
           <Route path="/stores/:storeId/reports" element={<StorePage stores={stores} tab="reports" />} />
           <Route path="*" element={<div className="page"><div className="error">Page not found. <Link to={home}>Back to the start</Link></div></div>} />

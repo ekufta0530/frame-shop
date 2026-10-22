@@ -93,3 +93,5 @@ export interface Insights {
   work_orders: number; latest_order_date: string;
   reports: Insight[];
 }
+
+export interface ConnectInfo { enabled: boolean; url: string | null }
