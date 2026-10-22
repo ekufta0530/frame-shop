@@ -36,7 +36,8 @@ def stores(tmp_path):
     c.commit()
     c.close()
     return [Store(id="shop", name="Shop", tier="cloud", data=str(tmp_path / "cloud.db")),
-            Store(id="mason", name="Mason", tier="on-prem", data=str(tmp_path / "lifesaver.sqlite"))]
+            Store(id="mason", name="Mason", tier="on-prem", data=str(tmp_path / "lifesaver.sqlite"),
+                  former_ids=("wheatons-old",))]
 
 
 @pytest.fixture
@@ -274,3 +275,10 @@ def test_every_store_route_checks_access():
     assert len(routes) == len(STORE_ROUTES)
     for r in routes:
         assert any(d.call is server._visible for d in r.dependant.dependencies), r.path
+
+
+@pytest.mark.parametrize("old, new", [("/stores/wheatons-old", "/stores/mason"),
+                                      ("/stores/wheatons-old/reports", "/stores/mason/reports")])
+def test_a_renamed_stores_old_links_redirect(client, old, new):
+    r = client.get(old, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == new

@@ -29,14 +29,19 @@
 #   outliers    -- visit ids ("<customer_id>:<YYYY-MM-DD>") the "exclude outlier" toggle removes
 #   outlier_label
 #   notes       -- extra bullets for the store's "How these are built" section
+#   former_ids  -- ids the store used to have: old /stores/<id> links redirect to the current one
 #
 # Order matters: it is the order stores appear in, and it fixes each store's chart colour.
 # Run `python -m core.stores` to check this file.
 
 [[store]]
-id = "main"
+id = "dans"
 name = "Dan's Camera City"
 tier = "cloud"
+former_ids = ["main"]
+# Its data and login predate the rename to "dans", so they keep the old id's names.
+data = "gs://frame-shop-511616-kpi-warehouse/stores/main/warehouse.db"
+secret = "lifesaver-store-main"
 chart_from = "2024-08"
 plot_from = { cohort = "2025-09", trailing = "2024-08" }
 baselines = { first_to_second_rate = 0.192, repeat_revenue_share = 0.273, median_days_to_second = 97, active_customers_ttm = 365 }
@@ -52,9 +57,10 @@ notes = [
 ]
 
 [[store]]
-id = "mason"
+id = "wheatons"
 name = "Wheaton's"
 tier = "on-prem"
+former_ids = ["mason"]
 data = "gs://frame-shop-511616-lifesaver-data/lifesaver.sqlite"
 chart_from = "2015-06"
 plot_from = { cohort = "2017-06", trailing = "2016-05" }

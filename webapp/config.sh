@@ -2,7 +2,7 @@
 PROJECT="${PROJECT:-frame-shop-511616}"
 REGION="${REGION:-us-west1}"                        # next to the Mason data bucket
 SERVICE="${SERVICE:-frame-shop}"
-IMAGE="${IMAGE:-ghcr.io/ekufta0530/lifesaver-mcp-site:latest}"   # built + pushed by publish.yml
+IMAGE="${IMAGE:-ghcr.io/ekufta0530/frame-shop-site:latest}"   # built + pushed by publish.yml
 RUNTIME_SA="frame-shop@${PROJECT}.iam.gserviceaccount.com"
 DATA_BUCKET="${DATA_BUCKET:-${PROJECT}-lifesaver-data}"        # lifesaver.sqlite, users.json
 WAREHOUSE_BUCKET="${WAREHOUSE_BUCKET:-${PROJECT}-kpi-warehouse}" # stores/<id>/warehouse.db (cloud stores)

@@ -130,7 +130,7 @@ Then see it in the website, locally ([webapp/README.md](webapp/README.md) has th
 
 ```bash
 (cd webapp/frontend && npm install && npm run build)
-STORE_MAIN_DATA=warehouse.db STORE_MASON_DATA=mason.sqlite AUTH_DISABLED=1 \
+STORE_DANS_DATA=warehouse.db STORE_WHEATONS_DATA=mason.sqlite AUTH_DISABLED=1 \
   .venv/bin/uvicorn webapp.server:app --port 8765
 ```
 

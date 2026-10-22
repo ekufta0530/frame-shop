@@ -8,7 +8,7 @@ adding a store is a config change, never a code change.
     python -m core.stores --tier cloud --matrix   # JSON for a GitHub Actions matrix
 
 ``STORES_FILE`` overrides the file's location (tests use it). ``STORE_<ID>_DATA``
-overrides one store's data location, e.g. ``STORE_MAIN_DATA=warehouse.db`` to
+overrides one store's data location, e.g. ``STORE_DANS_DATA=warehouse.db`` to
 develop against a local copy.
 """
 
@@ -37,7 +37,7 @@ _ID = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _KNOWN_KEYS = {
     "id", "name", "tier", "data", "secret", "chart_from", "plot_from", "baselines",
-    "outliers", "outlier_label", "notes", "exclude_invoices",
+    "outliers", "outlier_label", "notes", "exclude_invoices", "former_ids",
 }
 _KPIS = {
     "first_to_second_rate", "repeat_revenue_share", "median_days_to_second",
@@ -64,6 +64,8 @@ class Store:
     notes: tuple[str, ...] = ()
     # cloud only: invoices that were never sales (test orders), left out of every figure
     exclude_invoices: tuple[int, ...] = ()
+    # ids this store went by before, so old links (/stores/<old>/...) still land on it
+    former_ids: tuple[str, ...] = ()
 
     @property
     def on_prem(self) -> bool:
@@ -114,6 +116,9 @@ def _parse(raw: dict, i: int) -> Store:
     if not isinstance(exclude, list) or not all(isinstance(n, int) and not isinstance(n, bool)
                                                  for n in exclude):
         _fail(where, "exclude_invoices must be a list of invoice numbers")
+    former = raw.get("former_ids") or []
+    if not isinstance(former, list) or not all(isinstance(f, str) and _ID.match(f) for f in former):
+        _fail(where, "former_ids must be a list of store ids")
     return Store(
         id=sid,
         name=name.strip(),
@@ -127,6 +132,7 @@ def _parse(raw: dict, i: int) -> Store:
         outlier_label=raw.get("outlier_label") or "",
         notes=tuple(raw.get("notes") or ()),
         exclude_invoices=tuple(exclude),
+        former_ids=tuple(former),
     )
 
 
@@ -137,7 +143,7 @@ def load_stores(path: str | Path | None = None) -> list[Store]:
     stores = [_parse(raw, i) for i, raw in enumerate(doc.get("store") or [])]
     if not stores:
         raise StoreConfigError(f"{path}: no [[store]] entries")
-    ids = [s.id for s in stores]
+    ids = [s.id for s in stores] + [f for s in stores for f in s.former_ids]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
         raise StoreConfigError(f"{path}: duplicate store ids {sorted(dupes)}")

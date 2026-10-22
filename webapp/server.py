@@ -25,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -257,6 +257,11 @@ if (DIST / "assets").is_dir():
 
 @app.get("/{rest:path}")
 def spa(rest: str):
+    if rest.startswith("stores/"):  # a renamed store's old links: /stores/<former id>/... -> its current id
+        head, _, tail = rest.removeprefix("stores/").partition("/")
+        for s in manager.snapshot().stores:
+            if head in s.store.former_ids:
+                return RedirectResponse(f"/stores/{s.store.id}" + (f"/{tail}" if tail else ""), status_code=301)
     f = (DIST / rest).resolve()
     if rest and f.is_file() and f.is_relative_to(DIST):
         return FileResponse(f)

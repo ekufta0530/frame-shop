@@ -1,7 +1,7 @@
 """Who may sign in, and what they may see: a JSON file of {email: {name, role, stores}} kept next to the data.
 
     {"boss@gmail.com":  {"name": "Boss",  "role": "admin"},
-     "owner@gmail.com": {"name": "Owner", "role": "owner", "stores": ["mason"]}}
+     "owner@gmail.com": {"name": "Owner", "role": "owner", "stores": ["wheatons"]}}
 
 An admin sees every store, the all-stores overview and the pooled reports. An owner sees only the
 stores listed -- never the overview or "all", which carry the other stores' numbers. Anything else (no

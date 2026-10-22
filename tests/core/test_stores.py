@@ -11,7 +11,7 @@ def write(tmp_path, text):
 
 def test_repo_stores_file_is_valid():
     stores = load_stores()
-    assert [s.id for s in stores][:2] == ["main", "mason"]
+    assert [s.id for s in stores][:2] == ["dans", "wheatons"]
     assert {s.tier for s in stores} <= {"cloud", "on-prem"}
 
 
@@ -69,3 +69,11 @@ def test_exclude_invoices_for_cloud_stores_reach_the_refresh_matrix(tmp_path, mo
 def test_bad_exclude_invoices_rejected(tmp_path, body, msg):
     with pytest.raises(StoreConfigError, match=msg):
         load_stores(write(tmp_path, f'[[store]]\nid = "a"\nname = "A"\n{body}\n'))
+
+
+def test_former_ids_are_kept_and_cannot_clash_with_a_current_id(tmp_path):
+    (s,) = load_stores(write(tmp_path, '[[store]]\nid = "dans"\nname = "D"\ntier = "cloud"\nformer_ids = ["main"]\n'))
+    assert s.former_ids == ("main",)
+    with pytest.raises(StoreConfigError, match="duplicate store ids"):
+        load_stores(write(tmp_path, '[[store]]\nid = "a"\nname = "A"\ntier = "cloud"\nformer_ids = ["b"]\n'
+                                    '[[store]]\nid = "b"\nname = "B"\ntier = "cloud"\n'))

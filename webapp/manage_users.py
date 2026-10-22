@@ -2,7 +2,7 @@
 
   python3 -m webapp.manage_users list
   python3 -m webapp.manage_users add jane@gmail.com --name "Jane Smith" --admin       # every store + overview
-  python3 -m webapp.manage_users add owner@gmail.com --name "Owner" --store mason    # just their store(s)
+  python3 -m webapp.manage_users add owner@gmail.com --name "Owner" --store wheatons   # just their store(s)
   python3 -m webapp.manage_users remove jane@gmail.com
 
 --admin / --store (repeatable) also change an existing user's access. Someone with neither can't sign in.
